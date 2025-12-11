@@ -2,13 +2,14 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -22,60 +23,84 @@ import (
 
 const heartbeatInterval = 25 * time.Second
 
-// AgentMessage documents what the agent can receive from the server.
-type AgentMessage struct {
-	Type string `json:"type"`
-	Data string `json:"data,omitempty"`
+// ControlMessage documents what the agent can receive from the control server.
+type ControlMessage struct {
+	Type  string `json:"type"`
+	Token string `json:"token,omitempty"`
+	Data  string `json:"data,omitempty"`
 }
 
-// ServerMessage documents what the agent sends to the server.
-type ServerMessage struct {
+// AgentMessage documents what the agent sends to the control server.
+type AgentMessage struct {
 	Type        string         `json:"type"`
-	Token       string         `json:"token,omitempty"`
 	AgentID     string         `json:"agentId,omitempty"`
 	Fingerprint map[string]any `json:"fingerprint,omitempty"`
 	Data        string         `json:"data,omitempty"`
 }
 
 func main() {
-	server := flag.String("server", "ws://localhost:8080/ws", "Spectre server WebSocket endpoint")
-	token := flag.String("token", "changeme", "Auth token expected by the server")
+	listen := flag.String("listen", ":8081", "Address for the agent API and WebSocket server")
+	token := flag.String("token", "changeme", "Auth token expected from the control server")
 	flag.Parse()
 
 	fingerprint := collectFingerprint()
 	agentID := fingerprint["fingerprint"].(string)
 
-	dialCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	http.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"agentId":     agentID,
+			"fingerprint": fingerprint,
+		})
+	})
 
-	conn, _, err := websocket.DefaultDialer.DialContext(dialCtx, *server, nil)
-	if err != nil {
-		log.Fatalf("failed to connect to server: %v", err)
-	}
-	defer conn.Close()
+	upgrader := websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
 
-	log.Printf("connected to %s", *server)
+	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Printf("failed to upgrade connection: %v", err)
+			return
+		}
+		defer conn.Close()
 
-	hello := ServerMessage{Type: "hello", Token: *token, AgentID: agentID, Fingerprint: fingerprint}
-	if err := conn.WriteJSON(hello); err != nil {
-		log.Fatalf("failed to send handshake: %v", err)
-	}
+		var hello ControlMessage
+		if err := conn.ReadJSON(&hello); err != nil {
+			log.Printf("failed to read handshake: %v", err)
+			return
+		}
+		if hello.Type != "hello" || hello.Token != *token {
+			log.Printf("invalid handshake received")
+			return
+		}
 
-	shell := startShell()
-	defer shell.Close()
+		shell := startShell()
+		defer shell.Close()
 
-	errCh := make(chan error, 1)
-	go readFromServer(conn, shell, errCh)
-	go readFromPTY(conn, shell, errCh)
-	go sendHeartbeats(conn, errCh)
+		ack := AgentMessage{Type: "hello", AgentID: agentID, Fingerprint: fingerprint}
+		if err := conn.WriteJSON(ack); err != nil {
+			log.Printf("failed to send handshake ack: %v", err)
+			return
+		}
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	select {
-	case sig := <-sigCh:
-		log.Printf("received signal %s, shutting down", sig)
-	case err := <-errCh:
-		log.Printf("connection closed: %v", err)
+		errCh := make(chan error, 1)
+		go readFromControl(conn, shell, errCh)
+		go readFromPTY(conn, shell, errCh)
+		go sendHeartbeats(conn, errCh)
+
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		select {
+		case sig := <-sigCh:
+			log.Printf("received signal %s, shutting down", sig)
+		case err := <-errCh:
+			log.Printf("connection closed: %v", err)
+		}
+	})
+
+	log.Printf("starting Spectre agent server on %s", *listen)
+	if err := http.ListenAndServe(*listen, nil); err != nil {
+		log.Fatalf("failed to start server: %v", err)
 	}
 }
 
@@ -97,9 +122,9 @@ func startShell() *os.File {
 	return ptm
 }
 
-func readFromServer(conn *websocket.Conn, ptm *os.File, errCh chan<- error) {
+func readFromControl(conn *websocket.Conn, ptm *os.File, errCh chan<- error) {
 	for {
-		var msg AgentMessage
+		var msg ControlMessage
 		if err := conn.ReadJSON(&msg); err != nil {
 			errCh <- err
 			return
@@ -121,7 +146,7 @@ func readFromPTY(conn *websocket.Conn, ptm *os.File, errCh chan<- error) {
 	for {
 		n, err := reader.Read(buf)
 		if n > 0 {
-			payload := ServerMessage{Type: "output", Data: string(buf[:n])}
+			payload := AgentMessage{Type: "output", Data: string(buf[:n])}
 			if err := conn.WriteJSON(payload); err != nil {
 				errCh <- err
 				return
@@ -138,7 +163,7 @@ func sendHeartbeats(conn *websocket.Conn, errCh chan<- error) {
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 	for range ticker.C {
-		if err := conn.WriteJSON(ServerMessage{Type: "heartbeat"}); err != nil {
+		if err := conn.WriteJSON(AgentMessage{Type: "heartbeat"}); err != nil {
 			errCh <- err
 			return
 		}

@@ -1,9 +1,9 @@
 # Spectre
 
 Reference layout for a two-part remote command streaming stack:
-- **control-server/server/** — Node.js + TypeScript control plane built with Express and `ws`.
-- **control-server/client/** — Vite + React + TypeScript UI built with shadcn components for managing the control server.
-- **client/** — Go-based agent designed to run on Linux and stream a PTY over WebSockets.
+- **control-server/server/** — Node.js + TypeScript control plane built with Express and `ws` that dials out to remote agents.
+- **control-server/client/** — Vite + React + TypeScript UI for asking the control server to connect to agent endpoints and run commands.
+- **agent/** — Go-based agent that exposes an API/WebSocket server so the control plane can reach in and stream a PTY.
 
 Both components use WebSockets for interactive keystroke and output streaming. Agents authenticate using a shared token and provide a fingerprint derived from machine characteristics so the server can recognize reinstalls.
 
@@ -20,11 +20,12 @@ Both components use WebSockets for interactive keystroke and output streaming. A
    npm install
    npm run dev
    ```
-3. Build and run the agent on a target machine:
+3. Build and run the agent on a target machine. It hosts its own API/WebSocket server and waits for the control plane to connect:
    ```bash
-   cd client
+   cd agent
    GOOS=linux GOARCH=amd64 go build -o spectre-agent
-   ./spectre-agent -server ws://localhost:8080/ws -token changeme
+   ./spectre-agent -listen :8081 -token changeme
    ```
+4. In the control server UI, paste the remote agent address (e.g., `ws://<agent-ip>:8081/ws`) and click **Connect**. The control server will dial the agent and forward commands/output through the UI.
 
-The server will log agent connections, maintain an in-memory registry of connected/disconnected agents, and allow pushing keystrokes to live PTY sessions.
+The control server now initiates connections to agent API servers, maintains an in-memory registry of connection state, and allows pushing keystrokes to live PTY sessions.

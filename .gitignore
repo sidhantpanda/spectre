@@ -1,6 +1,6 @@
 node_modules
 server/node_modules
 server/dist
-client/spectre-agent
-client/bin
+agent/spectre-agent
+agent/bin
 .DS_Store

@@ -1,9 +1,9 @@
 # Spectre Agent (Go)
 
-A lightweight Go daemon that establishes a persistent WebSocket session with the Spectre control server and exposes a live pseudo-terminal for streaming keystrokes and output.
+A lightweight Go daemon that exposes an HTTP + WebSocket API so the Spectre control server can dial into a live pseudo-terminal for streaming keystrokes and output.
 
 ## Features
-- Connects to the Spectre server over WebSockets with a shared auth token.
+- Listens for control connections over WebSockets with a shared auth token.
 - Sends a unique fingerprint derived from machine ID, MAC addresses, and NIC names to identify reinstalls.
 - Spawns a login shell inside a PTY to support interactive sessions (sudo prompts, terminal control codes, etc.).
 - Streams keystrokes from the server to the PTY and streams output back to the server.
@@ -11,7 +11,7 @@ A lightweight Go daemon that establishes a persistent WebSocket session with the
 
 ## Building
 ```bash
-cd client
+cd agent
 GOOS=linux GOARCH=amd64 go build -o spectre-agent ./...
 ```
 The resulting `spectre-agent` binary can be dropped into `/usr/local/bin` on Linux hosts.
@@ -19,13 +19,13 @@ The resulting `spectre-agent` binary can be dropped into `/usr/local/bin` on Lin
 ## Running
 ```bash
 ./spectre-agent \
-  -server ws://localhost:8080/ws \
+  -listen :8081 \
   -token changeme
 ```
 
 Flags:
-- `-server` — WebSocket endpoint of the Spectre server.
-- `-token` — Shared auth token expected by the server.
+- `-listen` — Address to expose the agent API and WebSocket endpoint (default `:8081`).
+- `-token` — Shared auth token expected from the control server.
 
 ## Notes
 - PTY mode enables proper handling of `sudo` password prompts and interactive programs.
