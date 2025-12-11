@@ -7,21 +7,6 @@ import { AgentMessage, AgentRecord, ControlMessage } from "./types";
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const AUTH_TOKEN = process.env.AGENT_AUTH_TOKEN || "changeme";
 
-const app = express();
-app.use(express.json());
-app.use((req: Request, res: Response, next: NextFunction) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "Content-Type");
-  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  if (req.method === "OPTIONS") {
-    res.sendStatus(200);
-    return;
-  }
-  next();
-});
-
-const httpServer = createServer(app);
-
 type AgentEntry = {
   socket?: WebSocket;
   record: AgentRecord;
@@ -30,8 +15,18 @@ type AgentEntry = {
 
 const agents: Map<string, AgentEntry> = new Map();
 
+type AgentDependencies = {
+  listAgents: () => AgentRecord[];
+  connectToAgent: (address: string, token: string) => AgentRecord;
+  pushToAgent: (id: string, message: ControlMessage) => void;
+};
+
 function now() {
   return Date.now();
+}
+
+function listAgents() {
+  return Array.from(agents.values()).map((a) => a.record);
 }
 
 function connectToAgent(address: string, token: string) {
@@ -101,33 +96,59 @@ function pushToAgent(agentId: string, message: ControlMessage) {
   entry.socket.send(JSON.stringify(message));
 }
 
-app.get("/agents", (_req: Request, res: Response) => {
-  const records = Array.from(agents.values()).map((a) => a.record);
-  res.json(records);
-});
+export function createApp(
+  deps: AgentDependencies = {
+    listAgents,
+    connectToAgent,
+    pushToAgent,
+  },
+  defaultToken: string = AUTH_TOKEN,
+) {
+  const app = express();
+  app.use(express.json());
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Content-Type");
+    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    if (req.method === "OPTIONS") {
+      res.sendStatus(200);
+      return;
+    }
+    next();
+  });
 
-app.post("/agents/connect", (req: Request, res: Response) => {
-  const { address, token } = req.body as { address?: string; token?: string };
-  if (!address) {
-    return res.status(400).json({ error: "missing address" });
-  }
-  const record = connectToAgent(address, token || AUTH_TOKEN);
-  res.json(record);
-});
+  app.get("/agents", (_req: Request, res: Response) => {
+    res.json(deps.listAgents());
+  });
 
-app.post("/agents/:id/command", (req: Request, res: Response) => {
-  const { id } = req.params;
-  const { data } = req.body as { data?: string };
-  if (!data) {
-    return res.status(400).json({ error: "missing data" });
-  }
-  try {
-    pushToAgent(id, { type: "keystroke", data });
-    res.json({ status: "sent" });
-  } catch (err) {
-    res.status(404).json({ error: (err as Error).message });
-  }
-});
+  app.post("/agents/connect", (req: Request, res: Response) => {
+    const { address, token } = req.body as { address?: string; token?: string };
+    if (!address) {
+      return res.status(400).json({ error: "missing address" });
+    }
+    const record = deps.connectToAgent(address, token || defaultToken);
+    res.json(record);
+  });
+
+  app.post("/agents/:id/command", (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { data } = req.body as { data?: string };
+    if (!data) {
+      return res.status(400).json({ error: "missing data" });
+    }
+    try {
+      deps.pushToAgent(id, { type: "keystroke", data });
+      res.json({ status: "sent" });
+    } catch (err) {
+      res.status(404).json({ error: (err as Error).message });
+    }
+  });
+
+  return app;
+}
+
+const app = createApp();
+const httpServer = createServer(app);
 
 httpServer.listen(PORT, () => {
   console.log(`Spectre control server listening on :${PORT}`);

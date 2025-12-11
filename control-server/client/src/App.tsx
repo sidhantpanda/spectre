@@ -21,12 +21,12 @@ type Agent = {
   remoteAgentId?: string;
 };
 
-function formatTimestamp(ts: number) {
+export function formatTimestamp(ts: number) {
   const date = new Date(ts);
   return date.toLocaleTimeString();
 }
 
-function statusVariant(status: AgentStatus) {
+export function statusVariant(status: AgentStatus) {
   if (status === "connected") return "outline" as const;
   if (status === "connecting") return "secondary" as const;
   return "destructive" as const;
