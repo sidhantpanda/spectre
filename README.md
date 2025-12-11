@@ -3,7 +3,7 @@
 Reference layout for a two-part remote command streaming stack:
 - **control-server/server/** — Node.js + TypeScript control plane built with Express and `ws` that dials out to remote agents.
 - **control-server/client/** — Vite + React + TypeScript UI for asking the control server to connect to agent endpoints and run commands.
-- **client/** — Go-based agent that exposes an API/WebSocket server so the control plane can reach in and stream a PTY.
+- **agent/** — Go-based agent that exposes an API/WebSocket server so the control plane can reach in and stream a PTY.
 
 Both components use WebSockets for interactive keystroke and output streaming. Agents authenticate using a shared token and provide a fingerprint derived from machine characteristics so the server can recognize reinstalls.
 
@@ -22,7 +22,7 @@ Both components use WebSockets for interactive keystroke and output streaming. A
    ```
 3. Build and run the agent on a target machine. It hosts its own API/WebSocket server and waits for the control plane to connect:
    ```bash
-   cd client
+   cd agent
    GOOS=linux GOARCH=amd64 go build -o spectre-agent
    ./spectre-agent -listen :8081 -token changeme
    ```

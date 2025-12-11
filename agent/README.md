@@ -11,7 +11,7 @@ A lightweight Go daemon that exposes an HTTP + WebSocket API so the Spectre cont
 
 ## Building
 ```bash
-cd client
+cd agent
 GOOS=linux GOARCH=amd64 go build -o spectre-agent ./...
 ```
 The resulting `spectre-agent` binary can be dropped into `/usr/local/bin` on Linux hosts.
