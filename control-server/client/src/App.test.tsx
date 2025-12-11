@@ -19,7 +19,6 @@ describe("App helpers", () => {
 
 describe("App component", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
     global.fetch = vi.fn(() =>
       Promise.resolve({
         json: () => Promise.resolve([]),
@@ -28,7 +27,6 @@ describe("App component", () => {
   });
 
   afterEach(() => {
-    vi.useRealTimers();
     global.fetch = originalFetch;
     vi.restoreAllMocks();
   });

@@ -147,9 +147,12 @@ export function createApp(
   return app;
 }
 
-const app = createApp();
-const httpServer = createServer(app);
+// Only start the HTTP server when running the actual app, not during tests.
+if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
+  const app = createApp();
+  const httpServer = createServer(app);
 
-httpServer.listen(PORT, () => {
-  console.log(`Spectre control server listening on :${PORT}`);
-});
+  httpServer.listen(PORT, () => {
+    console.log(`Spectre control server listening on :${PORT}`);
+  });
+}
