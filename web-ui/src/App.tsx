@@ -2,6 +2,9 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
+import { AgentTerminal } from "./components/AgentTerminal";
+
+const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || "";
 
 type AgentStatus = "connecting" | "connected" | "disconnected";
 
@@ -36,12 +39,11 @@ function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [address, setAddress] = useState("");
   const [token, setToken] = useState("changeme");
-  const [commandInputs, setCommandInputs] = useState<Record<string, string>>({});
   const [isConnecting, setIsConnecting] = useState(false);
 
   async function fetchAgents() {
     try {
-      const res = await fetch("/agents");
+      const res = await fetch(`${API_BASE}/agents`);
       const body = await res.json();
       setAgents(body);
     } catch (err) {
@@ -63,7 +65,7 @@ function App() {
     if (!address) return;
     setIsConnecting(true);
     try {
-      await fetch("/agents/connect", {
+      await fetch(`${API_BASE}/agents/connect`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -76,21 +78,6 @@ function App() {
       console.error("failed to connect", err);
     } finally {
       setIsConnecting(false);
-    }
-  }
-
-  async function sendCommand(agentId: string) {
-    const data = commandInputs[agentId];
-    if (!data) return;
-    try {
-      await fetch(`/agents/${agentId}/command`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data: `${data}\n` }),
-      });
-      setCommandInputs((prev) => ({ ...prev, [agentId]: "" }));
-    } catch (err) {
-      console.error("failed to send command", err);
     }
   }
 
@@ -159,47 +146,26 @@ function App() {
             {agents.map((agent) => (
               <div
                 key={agent.id}
-                className="flex flex-col gap-3 rounded-lg border bg-muted/40 p-4 md:flex-row md:items-center md:justify-between"
+                className="flex flex-col gap-4 rounded-lg border bg-muted/40 p-4"
               >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Badge variant={statusVariant(agent.status)} className="capitalize">
-                      {agent.status}
-                    </Badge>
-                    <p className="font-medium">{agent.remoteAgentId ?? agent.id}</p>
+                <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Badge variant={statusVariant(agent.status)} className="capitalize">
+                        {agent.status}
+                      </Badge>
+                      <p className="font-medium">{agent.remoteAgentId ?? agent.id}</p>
+                    </div>
+                    <p className="text-sm text-muted-foreground">{agent.address}</p>
+                    {agent.fingerprint && (
+                      <p className="text-xs text-muted-foreground">
+                        Hostname: {agent.fingerprint.hostname} • Interfaces: {agent.fingerprint.nics.join(", ")}
+                      </p>
+                    )}
                   </div>
-                  <p className="text-sm text-muted-foreground">{agent.address}</p>
-                  {agent.fingerprint && (
-                    <p className="text-xs text-muted-foreground">
-                      Hostname: {agent.fingerprint.hostname} • Interfaces: {agent.fingerprint.nics.join(", ")}
-                    </p>
-                  )}
+                  <div className="text-xs text-muted-foreground">Last seen: {formatTimestamp(agent.lastSeen)}</div>
                 </div>
-                <div className="flex flex-col gap-2 md:w-1/3">
-                  <input
-                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                    placeholder="Enter command"
-                    value={commandInputs[agent.id] ?? ""}
-                    onChange={(e) =>
-                      setCommandInputs((prev) => ({
-                        ...prev,
-                        [agent.id]: e.target.value,
-                      }))
-                    }
-                    disabled={agent.status !== "connected"}
-                  />
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>Last seen: {formatTimestamp(agent.lastSeen)}</span>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={agent.status !== "connected"}
-                      onClick={() => sendCommand(agent.id)}
-                    >
-                      Run
-                    </Button>
-                  </div>
-                </div>
+                <AgentTerminal agentId={agent.id} apiBase={API_BASE} connected={agent.status === "connected"} />
               </div>
             ))}
           </CardContent>

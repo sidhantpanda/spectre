@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -46,7 +47,13 @@ func main() {
 	fingerprint := collectFingerprint()
 	agentID := fingerprint["fingerprint"].(string)
 
-	http.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+	connectionURL := buildConnectionURL(*listen)
+	log.Printf("auth token: %s", *token)
+	log.Printf("connect control server using: %s", connectionURL)
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"agentId":     agentID,
@@ -56,7 +63,7 @@ func main() {
 
 	upgrader := websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
 
-	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Printf("failed to upgrade connection: %v", err)
@@ -88,19 +95,31 @@ func main() {
 		go readFromPTY(conn, shell, errCh)
 		go sendHeartbeats(conn, errCh)
 
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		select {
-		case sig := <-sigCh:
-			log.Printf("received signal %s, shutting down", sig)
-		case err := <-errCh:
+		if err := <-errCh; err != nil {
 			log.Printf("connection closed: %v", err)
 		}
 	})
 
-	log.Printf("starting Spectre agent server on %s", *listen)
-	if err := http.ListenAndServe(*listen, nil); err != nil {
-		log.Fatalf("failed to start server: %v", err)
+	server := &http.Server{
+		Addr:    *listen,
+		Handler: mux,
+	}
+
+	go func() {
+		log.Printf("starting Spectre agent server on %s", *listen)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("failed to start server: %v", err)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("server shutdown error: %v", err)
 	}
 }
 
@@ -213,4 +232,43 @@ func listInterfaces() ([]string, []string) {
 		}
 	}
 	return macs, nics
+}
+
+// buildConnectionURL returns a usable WebSocket URL for the control server to dial.
+func buildConnectionURL(listen string) string {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return fmt.Sprintf("ws://%s/ws", strings.TrimPrefix(listen, ":"))
+	}
+
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		if ip := guessLocalIPv4(); ip != "" {
+			host = ip
+		} else {
+			host = "localhost"
+		}
+	}
+	return fmt.Sprintf("ws://%s:%s/ws", host, port)
+}
+
+func guessLocalIPv4() string {
+	ifs, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range ifs {
+		if (iface.Flags&net.FlagUp) == 0 || (iface.Flags&net.FlagLoopback) != 0 {
+			continue
+		}
+		addrs, _ := iface.Addrs()
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok {
+				ip := ipnet.IP.To4()
+				if ip != nil && !ip.IsLoopback() {
+					return ip.String()
+				}
+			}
+		}
+	}
+	return ""
 }
