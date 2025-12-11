@@ -1,4 +1,4 @@
-export type AgentStatus = "connected" | "disconnected";
+export type AgentStatus = "connecting" | "connected" | "disconnected";
 
 export interface AgentFingerprint {
   hostname: string;
@@ -9,16 +9,18 @@ export interface AgentFingerprint {
 
 export interface AgentRecord {
   id: string;
+  address: string;
   status: AgentStatus;
   lastSeen: number;
-  fingerprint: AgentFingerprint;
+  fingerprint?: AgentFingerprint;
+  remoteAgentId?: string;
 }
 
-export type ServerMessage =
-  | { type: "keystroke"; data: string }
-  | { type: "ping" };
+export type ControlMessage =
+  | { type: "hello"; token: string }
+  | { type: "keystroke"; data: string };
 
 export type AgentMessage =
-  | { type: "hello"; token: string; agentId: string; fingerprint: AgentFingerprint }
+  | { type: "hello"; agentId: string; fingerprint: AgentFingerprint }
   | { type: "output"; data: string }
   | { type: "heartbeat" };

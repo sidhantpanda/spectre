@@ -1,12 +1,13 @@
 # Spectre Control Server
 
-A Node.js + TypeScript control plane that keeps track of connected Spectre agents, exposes a WebSocket endpoint for bi-directional terminal streaming, and provides REST endpoints for administrative actions.
+A Node.js + TypeScript control plane that dials into Spectre agents, keeps track of connection status, and provides REST endpoints for sending commands.
 
 ## Features
-- Express HTTP server with WebSocket upgrade endpoint using `ws`.
-- Token-based authentication for agents during handshake.
-- Tracks connected/disconnected agents and exposes `/agents` listing.
-- Provides a `/agents/:id/command` endpoint to push keystrokes or commands to an agent's pseudo-terminal session.
+- Express HTTP server that connects outward to agent WebSocket endpoints using `ws`.
+- Token-based authentication shared with agents during handshake.
+- Tracks connecting/connected/disconnected agents and exposes a `/agents` listing.
+- `/agents/connect` endpoint that instructs the control server to dial a remote agent address.
+- `/agents/:id/command` endpoint to push keystrokes or commands to an agent's pseudo-terminal session.
 - In-memory registry for demo purposes; swap with persistent storage or a message bus for production.
 
 ## Getting Started
@@ -22,11 +23,11 @@ A Node.js + TypeScript control plane that keeps track of connected Spectre agent
 
 ## API
 - `GET /agents` — Lists known agents with connection status and fingerprint metadata.
+- `POST /agents/connect` — Body: `{ "address": "ws://<agent-ip>:8081/ws", "token": "changeme" }` to initiate a connection.
 - `POST /agents/:id/command` — Pushes keystrokes/command text to the agent. Body: `{ "data": "ls -la\n" }`.
-- WebSocket endpoint: `ws://<host>:<port>/ws`. Agents send a `hello` frame on connect.
 
 ## Project Structure
-- `src/server.ts` — Express setup, WebSocket handling, and in-memory agent registry.
+- `src/server.ts` — Express setup, outbound WebSocket handling, and in-memory agent registry.
 - `src/types.ts` — Shared message/agent types used by the server.
 
 ## Notes
