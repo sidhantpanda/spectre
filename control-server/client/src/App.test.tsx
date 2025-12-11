@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach, afterEach, type Mock } from "vitest";
 import App, { formatTimestamp, statusVariant } from "./App";
 
-const originalFetch = global.fetch;
+const originalFetch = globalThis.fetch;
 
 describe("App helpers", () => {
   it("formats timestamps in local time", () => {
@@ -19,7 +19,7 @@ describe("App helpers", () => {
 
 describe("App component", () => {
   beforeEach(() => {
-    global.fetch = vi.fn(() =>
+    globalThis.fetch = vi.fn(() =>
       Promise.resolve({
         json: () => Promise.resolve([]),
       }) as unknown as Promise<Response>,
@@ -27,19 +27,19 @@ describe("App component", () => {
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
+    globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 
   it("loads and displays empty state", async () => {
     render(<App />);
 
-    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
     expect(screen.getByText(/No connections yet/i)).toBeInTheDocument();
   });
 
   it("submits connection details", async () => {
-    const fetchMock = global.fetch as unknown as Mock;
+    const fetchMock = globalThis.fetch as unknown as Mock;
     const responses = [
       Promise.resolve({ json: () => Promise.resolve([]) }),
       Promise.resolve({ json: () => Promise.resolve({}) }),
