@@ -68,7 +68,7 @@ export function AgentTerminal({ agentId, apiBase, connected }: Props) {
 
     term.onData((data) => {
       if (socket.readyState === WebSocket.OPEN) {
-        socket.send(data);
+        socket.send(JSON.stringify({ type: "input", data }));
       }
     });
 
@@ -84,9 +84,17 @@ export function AgentTerminal({ agentId, apiBase, connected }: Props) {
         if (payload.type === "output") {
           term.write(payload.data);
         } else if (payload.type === "status") {
+          if (payload.status === "connected") {
+            setStatus("connected");
+          } else if (payload.status === "connecting") {
+            setStatus("connecting");
+          } else {
+            setStatus("disconnected");
+          }
           term.writeln(`\r\n[agent status] ${payload.status}`);
         } else if (payload.type === "error") {
           term.writeln(`\r\n[error] ${payload.message}`);
+          setStatus("error");
         }
       } catch {
         term.write(evt.data);

@@ -1,28 +1,12 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
-import { AgentTerminal } from "./components/AgentTerminal";
+import type { Agent, AgentStatus } from "./state/agents";
+import { fetchAgents } from "./state/agents";
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || "";
-
-type AgentStatus = "connecting" | "connected" | "disconnected";
-
-type AgentFingerprint = {
-  hostname: string;
-  machineId?: string;
-  macAddresses: string[];
-  nics: string[];
-};
-
-type Agent = {
-  id: string;
-  address: string;
-  status: AgentStatus;
-  lastSeen: number;
-  fingerprint?: AgentFingerprint;
-  remoteAgentId?: string;
-};
 
 export function formatTimestamp(ts: number) {
   const date = new Date(ts);
@@ -40,11 +24,11 @@ function App() {
   const [address, setAddress] = useState("");
   const [token, setToken] = useState("changeme");
   const [isConnecting, setIsConnecting] = useState(false);
+  const navigate = useNavigate();
 
-  async function fetchAgents() {
+  async function loadAgents() {
     try {
-      const res = await fetch(`${API_BASE}/agents`);
-      const body = await res.json();
+      const body = await fetchAgents(API_BASE);
       setAgents(body);
     } catch (err) {
       console.error("failed to load agents", err);
@@ -52,8 +36,8 @@ function App() {
   }
 
   useEffect(() => {
-    fetchAgents();
-    const interval = setInterval(fetchAgents, 3000);
+    loadAgents();
+    const interval = setInterval(loadAgents, 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -144,11 +128,12 @@ function App() {
           <CardContent className="space-y-3">
             {agents.length === 0 && <p className="text-sm text-muted-foreground">No connections yet.</p>}
             {agents.map((agent) => (
-              <div
+              <button
                 key={agent.id}
-                className="flex flex-col gap-4 rounded-lg border bg-muted/40 p-4"
+                onClick={() => navigate(`/agents/${agent.id}`)}
+                className="flex w-full flex-col gap-2 rounded-lg border bg-muted/40 p-4 text-left transition hover:border-primary"
               >
-                <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <Badge variant={statusVariant(agent.status)} className="capitalize">
@@ -157,16 +142,15 @@ function App() {
                       <p className="font-medium">{agent.remoteAgentId ?? agent.id}</p>
                     </div>
                     <p className="text-sm text-muted-foreground">{agent.address}</p>
+                  </div>
+                  <div className="text-xs text-muted-foreground text-right">
+                    <p>Last seen: {formatTimestamp(agent.lastSeen)}</p>
                     {agent.fingerprint && (
-                      <p className="text-xs text-muted-foreground">
-                        Hostname: {agent.fingerprint.hostname} • Interfaces: {agent.fingerprint.nics.join(", ")}
-                      </p>
+                      <p>Hostname: {agent.fingerprint.hostname}</p>
                     )}
                   </div>
-                  <div className="text-xs text-muted-foreground">Last seen: {formatTimestamp(agent.lastSeen)}</div>
                 </div>
-                <AgentTerminal agentId={agent.id} apiBase={API_BASE} connected={agent.status === "connected"} />
-              </div>
+              </button>
             ))}
           </CardContent>
         </Card>

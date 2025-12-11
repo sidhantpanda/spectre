@@ -30,6 +30,10 @@ function listAgents() {
   return Array.from(agents.values()).map((a) => a.record);
 }
 
+function currentAgent(agentId: string) {
+  return agents.get(agentId);
+}
+
 function connectToAgent(address: string, token: string) {
   const id = uuid();
   const entry: AgentEntry = {
@@ -59,7 +63,7 @@ function connectToAgent(address: string, token: string) {
         entry.record.status = "connected";
         entry.record.remoteAgentId = payload.agentId;
         entry.record.fingerprint = payload.fingerprint;
-        handleAgentStatusChange(id, "connected");
+        handleAgentStatusChange(id, "connected", payload.fingerprint, payload.agentId);
       }
       if (payload.type === "output") {
         broadcastToUi(id, payload);
@@ -163,8 +167,13 @@ function broadcastToUi(agentId: string, payload: { type: string; [key: string]: 
   }
 }
 
-function handleAgentStatusChange(agentId: string, status: AgentStatus) {
-  broadcastToUi(agentId, { type: "status", status });
+function handleAgentStatusChange(
+  agentId: string,
+  status: AgentStatus,
+  fingerprint?: AgentRecord["fingerprint"],
+  remoteAgentId?: string,
+) {
+  broadcastToUi(agentId, { type: "status", status, fingerprint, remoteAgentId, agentId });
 }
 
 // Only start the HTTP server when running the actual app, not during tests.
@@ -182,13 +191,31 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
       return;
     }
 
+    const entry = currentAgent(agentId);
+    if (!entry) {
+      socket.close(4404, "agent not found");
+      return;
+    }
+
+    socket.send(
+      JSON.stringify({
+        type: "status",
+        status: entry.record.status,
+        fingerprint: entry.record.fingerprint,
+        remoteAgentId: entry.record.remoteAgentId,
+        agentId: entry.record.id,
+      }),
+    );
+
     const group = uiClients.get(agentId) ?? new Set<WebSocket>();
     group.add(socket);
     uiClients.set(agentId, group);
 
     socket.on("message", (data: RawData) => {
       try {
-        pushToAgent(agentId, { type: "keystroke", data: data.toString() });
+        const parsed = JSON.parse(data.toString()) as { type?: string; data?: string };
+        if (parsed.type !== "input" || typeof parsed.data !== "string") return;
+        pushToAgent(agentId, { type: "keystroke", data: parsed.data });
       } catch (err) {
         socket.send(JSON.stringify({ type: "error", message: (err as Error).message }));
       }

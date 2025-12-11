@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach, afterEach, type Mock } from "vitest";
 import App, { formatTimestamp, statusVariant } from "./App";
 
@@ -32,7 +33,11 @@ describe("App component", () => {
   });
 
   it("loads and displays empty state", async () => {
-    render(<App />);
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
     expect(screen.getByText(/No connections yet/i)).toBeInTheDocument();
@@ -47,7 +52,11 @@ describe("App component", () => {
     ];
     fetchMock.mockImplementation(() => responses.shift() as Promise<Response>);
 
-    render(<App />);
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
 
     const addressInput = screen.getByLabelText(/Agent WebSocket URL/i);
     fireEvent.change(addressInput, { target: { value: "ws://test/ws" } });
