@@ -1,22 +1,22 @@
 # Spectre
 
 Reference layout for a two-part remote command streaming stack:
-- **control-server/server/** — Node.js + TypeScript control plane built with Express and `ws` that dials out to remote agents.
-- **control-server/client/** — Vite + React + TypeScript UI for asking the control server to connect to agent endpoints and run commands.
+- **server/** — Node.js + TypeScript control plane built with Express and `ws` that dials out to remote agents.
+- **web-ui/** — Vite + React + TypeScript UI for asking the control server to connect to agent endpoints and run commands.
 - **agent/** — Go-based agent that exposes an API/WebSocket server so the control plane can reach in and stream a PTY.
 
 Both components use WebSockets for interactive keystroke and output streaming. Agents authenticate using a shared token and provide a fingerprint derived from machine characteristics so the server can recognize reinstalls.
 
 ## Quick Start
-1. Start the control server API (see `control-server/server/README.md` for details):
+1. Start the control server API (see `server/README.md` for details):
    ```bash
-   cd control-server/server
+   cd server
    npm install
    npm run dev
    ```
 2. Start the UI for interacting with the control server:
    ```bash
-   cd control-server/client
+   cd web-ui
    npm install
    npm run dev
    ```

@@ -34,16 +34,16 @@ jobs:
         with:
           node-version: 20
       - name: Install dependencies
-        working-directory: control-server/server
+        working-directory: server
         run: npm install
       - name: Test
-        working-directory: control-server/server
+        working-directory: server
         run: npm test
       - name: Build
-        working-directory: control-server/server
+        working-directory: server
         run: npm run build
 
-  control-client:
+  web-ui:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -53,11 +53,11 @@ jobs:
         with:
           node-version: 20
       - name: Install dependencies
-        working-directory: control-server/client
+        working-directory: web-ui
         run: npm install
       - name: Test
-        working-directory: control-server/client
+        working-directory: web-ui
         run: npm test
       - name: Build
-        working-directory: control-server/client
+        working-directory: web-ui
         run: npm run build
