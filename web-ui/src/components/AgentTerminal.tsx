@@ -28,6 +28,15 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
   // Initialize the terminal once.
   useEffect(() => {
     if (termRef.current) return;
+    const safeFit = () => {
+      if (!fitRef.current || !termRef.current || !containerRef.current || !termRef.current.element) return;
+      try {
+        fitRef.current.fit();
+      } catch {
+        // ignore transient sizing errors if terminal not yet mounted
+      }
+    };
+
     const term = new Terminal({
       convertEol: true,
       fontSize: 13,
@@ -52,11 +61,11 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
     const node = containerRef.current;
     if (node) {
       term.open(node);
-      fit.fit();
+      safeFit();
     }
 
     const handleResize = () => {
-      fitRef.current?.fit();
+      safeFit();
     };
     window.addEventListener("resize", handleResize);
 
@@ -117,7 +126,13 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
         backoff = 1000;
         setStatus("connected");
         term.writeln("\x1b[32mConnected to agent terminal\x1b[0m");
-        fitRef.current?.fit();
+        if (fitRef.current) {
+          try {
+            fitRef.current.fit();
+          } catch {
+            /* ignore fit error */
+          }
+        }
       };
 
       socket.onmessage = (evt) => {
