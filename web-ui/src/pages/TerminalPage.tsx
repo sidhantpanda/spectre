@@ -63,7 +63,12 @@ export default function TerminalPage() {
       <section className="mx-auto max-w-5xl px-6 py-6">
         {!agent && <p className="text-sm text-muted-foreground">Agent not found.</p>}
         {agent && (
-          <AgentTerminal agentId={agent.id} apiBase={API_BASE} connected={agent.status === "connected"} />
+          <AgentTerminal
+            agentId={agent.id}
+            apiBase={API_BASE}
+            connected={agent.status === "connected"}
+            connectionId={agent.connectionId}
+          />
         )}
       </section>
     </main>

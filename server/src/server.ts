@@ -46,10 +46,12 @@ function currentAgent(agentId: string) {
 
 function connectToAgent(address: string, token: string) {
   const id = uuid();
+  const connectionId = uuid();
   const entry: AgentEntry = {
     token,
     record: {
       id,
+      connectionId,
       address,
       status: "connecting",
       lastSeen: now(),
@@ -230,6 +232,7 @@ function handleAgentStatusChange(record: AgentRecord) {
     fingerprint: record.fingerprint,
     remoteAgentId: record.remoteAgentId,
     agentId: record.id,
+    connectionId: record.connectionId,
   });
   broadcastAgentEvent(record);
 }
@@ -276,6 +279,7 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
         fingerprint: entry.record.fingerprint,
         remoteAgentId: entry.record.remoteAgentId,
         agentId: entry.record.id,
+        connectionId: entry.record.connectionId,
       }),
     );
 
@@ -332,6 +336,7 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
       token,
       record: {
         id,
+        connectionId: uuid(),
         address,
         status: "connecting",
         lastSeen: now(),

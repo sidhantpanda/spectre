@@ -12,12 +12,13 @@ export type AgentFingerprint = {
 
 export type Agent = {
   id: string;
+  connectionId: string;
   address: string;
   status: AgentStatus;
   lastSeen: number;
   fingerprint?: AgentFingerprint;
   remoteAgentId?: string;
-   direction: AgentDirection;
+  direction: AgentDirection;
 };
 
 export async function fetchAgents(apiBase: string = API_BASE): Promise<Agent[]> {

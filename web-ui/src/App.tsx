@@ -144,7 +144,7 @@ function App() {
             {agents.map((agent) => (
               <button
                 key={agent.id}
-                onClick={() => navigate(`/agents/${agent.id}`)}
+                onClick={() => navigate(`/agent/${agent.id}`)}
                 className="flex w-full flex-col gap-2 rounded-lg border bg-muted/40 p-4 text-left transition hover:border-primary"
               >
                 <div className="flex items-start justify-between gap-3">

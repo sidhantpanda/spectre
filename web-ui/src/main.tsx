@@ -10,7 +10,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<App />} />
-        <Route path="/agents/:id" element={<TerminalPage />} />
+        <Route path="/agent/:id" element={<TerminalPage />} />
       </Routes>
     </BrowserRouter>
   </React.StrictMode>

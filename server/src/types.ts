@@ -11,6 +11,7 @@ export interface AgentFingerprint {
 export interface AgentRecord {
   id: string;
   address: string;
+  connectionId: string;
   status: AgentStatus;
   lastSeen: number;
   fingerprint?: AgentFingerprint;

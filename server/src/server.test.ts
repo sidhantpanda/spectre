@@ -12,6 +12,7 @@ describe("createApp routes", () => {
     listAgents = vi.fn(() => []);
     connectToAgent = vi.fn((address: string, token: string) => ({
       id: "id-1",
+      connectionId: "conn-1",
       address,
       status: "connecting",
       lastSeen: 123,
@@ -23,7 +24,14 @@ describe("createApp routes", () => {
 
   it("returns known agents", async () => {
     const agents: AgentRecord[] = [
-      { id: "a1", address: "ws://example", status: "connected", lastSeen: 1, direction: "outbound" },
+      {
+        id: "a1",
+        connectionId: "conn-a1",
+        address: "ws://example",
+        status: "connected",
+        lastSeen: 1,
+        direction: "outbound",
+      },
     ];
     listAgents = vi.fn(() => agents);
 

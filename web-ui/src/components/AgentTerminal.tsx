@@ -7,11 +7,12 @@ type Props = {
   agentId: string;
   apiBase?: string;
   connected: boolean;
+  connectionId?: string;
 };
 
 type TerminalMessage =
   | { type: "output"; data: string }
-  | { type: "status"; status: string }
+  | { type: "status"; status: string; connectionId?: string }
   | { type: "error"; message: string };
 
 function buildSocketUrl(apiBase: string | undefined, agentId: string) {
@@ -22,10 +23,11 @@ function buildSocketUrl(apiBase: string | undefined, agentId: string) {
   return url.toString();
 }
 
-export function AgentTerminal({ agentId, apiBase, connected }: Props) {
+export function AgentTerminal({ agentId, apiBase, connected, connectionId }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const [status, setStatus] = useState<"disconnected" | "connecting" | "connected" | "error">("disconnected");
+  const [sessionId, setSessionId] = useState(connectionId ?? "");
 
   useEffect(() => {
     if (!connected) {
@@ -57,6 +59,10 @@ export function AgentTerminal({ agentId, apiBase, connected }: Props) {
       fit.fit();
     }
 
+    if (connectionId) {
+      setSessionId(connectionId);
+    }
+
     const socket = new WebSocket(buildSocketUrl(apiBase, agentId));
     socketRef.current = socket;
     setStatus("connecting");
@@ -86,6 +92,9 @@ export function AgentTerminal({ agentId, apiBase, connected }: Props) {
         } else if (payload.type === "status") {
           if (payload.status === "connected") {
             setStatus("connected");
+            if (payload.connectionId) {
+              setSessionId(payload.connectionId);
+            }
           } else if (payload.status === "connecting") {
             setStatus("connecting");
           } else {
@@ -117,13 +126,16 @@ export function AgentTerminal({ agentId, apiBase, connected }: Props) {
       term.dispose();
       socketRef.current = null;
     };
-  }, [agentId, apiBase, connected]);
+  }, [agentId, apiBase, connected, connectionId]);
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>Terminal</span>
-        <span>{status}</span>
+        <span className="flex items-center gap-2">
+          {sessionId && <code className="rounded bg-muted px-2 py-0.5 text-[11px]">session: {sessionId}</code>}
+          <span>{status}</span>
+        </span>
       </div>
       <div
         ref={containerRef}
