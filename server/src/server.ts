@@ -288,7 +288,7 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
     uiClients.set(agentId, group);
 
     try {
-      deps.pushToAgent(agentId, { type: "reset" });
+      pushToAgent(agentId, { type: "reset" });
     } catch (err) {
       socket.send(JSON.stringify({ type: "error", message: (err as Error).message }));
     }

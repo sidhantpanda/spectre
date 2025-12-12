@@ -6,7 +6,6 @@ import "@xterm/xterm/css/xterm.css";
 type Props = {
   agentId: string;
   apiBase?: string;
-  connected: boolean;
   connectionId?: string;
 };
 
@@ -23,18 +22,18 @@ function buildSocketUrl(apiBase: string | undefined, agentId: string) {
   return url.toString();
 }
 
-export function AgentTerminal({ agentId, apiBase, connected, connectionId }: Props) {
+export function AgentTerminal({ agentId, apiBase, connectionId }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const reconnectTimer = useRef<number | null>(null);
   const [status, setStatus] = useState<"disconnected" | "connecting" | "connected" | "error">("disconnected");
   const [sessionId, setSessionId] = useState(connectionId ?? "");
 
+  // Initialize terminal once.
   useEffect(() => {
-    if (!connected) {
-      setStatus("disconnected");
-      return;
-    }
-
+    if (termRef.current) return;
     const term = new Terminal({
       convertEol: true,
       fontSize: 13,
@@ -53,80 +52,118 @@ export function AgentTerminal({ agentId, apiBase, connected, connectionId }: Pro
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    termRef.current = term;
+    fitRef.current = fit;
+
     const node = containerRef.current;
     if (node) {
       term.open(node);
       fit.fit();
     }
 
-    if (connectionId) {
-      setSessionId(connectionId);
-    }
-
-    const socket = new WebSocket(buildSocketUrl(apiBase, agentId));
-    socketRef.current = socket;
-    setStatus("connecting");
-
     const handleResize = () => {
-      fit.fit();
+      fitRef.current?.fit();
     };
     window.addEventListener("resize", handleResize);
 
-    term.onData((data) => {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: "input", data }));
-      }
-    });
-
-    socket.onopen = () => {
-      setStatus("connected");
-      term.writeln("\x1b[32mConnected to agent terminal\x1b[0m");
-      fit.fit();
-    };
-
-    socket.onmessage = (evt) => {
-      try {
-        const payload = JSON.parse(evt.data) as TerminalMessage;
-        if (payload.type === "output") {
-          term.write(payload.data);
-        } else if (payload.type === "status") {
-          if (payload.status === "connected") {
-            setStatus("connected");
-            if (payload.connectionId) {
-              setSessionId(payload.connectionId);
-            }
-          } else if (payload.status === "connecting") {
-            setStatus("connecting");
-          } else {
-            setStatus("disconnected");
-          }
-          term.writeln(`\r\n[agent status] ${payload.status}`);
-        } else if (payload.type === "error") {
-          term.writeln(`\r\n[error] ${payload.message}`);
-          setStatus("error");
-        }
-      } catch {
-        term.write(evt.data);
-      }
-    };
-
-    socket.onclose = () => {
-      setStatus("disconnected");
-      term.writeln("\r\n[disconnected]");
-    };
-
-    socket.onerror = () => {
-      setStatus("error");
-      term.writeln("\r\n[error] Unable to reach terminal backend");
-    };
-
     return () => {
       window.removeEventListener("resize", handleResize);
-      socket.close();
-      term.dispose();
-      socketRef.current = null;
+      termRef.current?.dispose();
+      termRef.current = null;
     };
-  }, [agentId, apiBase, connected, connectionId]);
+  }, []);
+
+  // Reconnect logic when agentId/apiBase/connectionId change.
+  useEffect(() => {
+    if (connectionId) setSessionId(connectionId);
+    const term = termRef.current;
+    if (!term) return;
+
+    let cancelled = false;
+    let backoff = 1000;
+
+    const connect = () => {
+      if (cancelled) return;
+      setStatus("connecting");
+      const socket = new WebSocket(buildSocketUrl(apiBase, agentId));
+      socketRef.current = socket;
+
+      term.writeln(`\r\n[connecting] ${agentId}`);
+
+      term.onData((data) => {
+        if (socketRef.current?.readyState === WebSocket.OPEN) {
+          socketRef.current.send(JSON.stringify({ type: "input", data }));
+        }
+      });
+
+      socket.onopen = () => {
+        backoff = 1000;
+        setStatus("connected");
+        term.writeln("\x1b[32mConnected to agent terminal\x1b[0m");
+        fitRef.current?.fit();
+      };
+
+      socket.onmessage = (evt) => {
+        try {
+          const payload = JSON.parse(evt.data) as TerminalMessage;
+          if (payload.type === "output") {
+            term.write(payload.data);
+          } else if (payload.type === "status") {
+            if (payload.status === "connected") {
+              setStatus("connected");
+              if (payload.connectionId) {
+                setSessionId(payload.connectionId);
+              }
+            } else if (payload.status === "connecting") {
+              setStatus("connecting");
+            } else {
+              setStatus("disconnected");
+            }
+            term.writeln(`\r\n[agent status] ${payload.status}`);
+          } else if (payload.type === "error") {
+            term.writeln(`\r\n[error] ${payload.message}`);
+            setStatus("error");
+          }
+        } catch {
+          term.write(evt.data);
+        }
+      };
+
+      const scheduleReconnect = () => {
+        if (cancelled) return;
+        if (socketRef.current === socket) {
+          socketRef.current = null;
+        }
+        setStatus("disconnected");
+        term.writeln("\r\n[disconnected] retrying...");
+        backoff = Math.min(backoff * 2, 5000);
+        reconnectTimer.current = window.setTimeout(connect, backoff);
+      };
+
+      socket.onclose = scheduleReconnect;
+      socket.onerror = () => {
+        setStatus("error");
+        term.writeln("\r\n[error] Unable to reach terminal backend");
+        scheduleReconnect();
+      };
+    };
+
+    connect();
+
+    return () => {
+      cancelled = true;
+      if (reconnectTimer.current) {
+        clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = null;
+      }
+      if (socketRef.current) {
+        socketRef.current.onclose = null;
+        socketRef.current.onerror = null;
+        socketRef.current.close();
+        socketRef.current = null;
+      }
+    };
+  }, [agentId, apiBase, connectionId]);
 
   return (
     <div className="flex flex-col gap-2">

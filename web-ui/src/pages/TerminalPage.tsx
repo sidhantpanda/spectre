@@ -39,6 +39,7 @@ export default function TerminalPage() {
   }, []);
 
   const agent = useMemo(() => agents.find((a) => a.id === id), [agents, id]);
+  const currentId = agent?.id ?? id ?? "";
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -61,13 +62,13 @@ export default function TerminalPage() {
         </div>
       </header>
       <section className="mx-auto max-w-5xl px-6 py-6">
-        {!agent && <p className="text-sm text-muted-foreground">Agent not found.</p>}
-        {agent && (
+        {!agent && <p className="text-sm text-muted-foreground">Agent not found (attempting to connect anyway)...</p>}
+        {currentId && (
           <AgentTerminal
-            agentId={agent.id}
+            key={currentId}
+            agentId={currentId}
             apiBase={API_BASE}
-            connected={agent.status === "connected"}
-            connectionId={agent.connectionId}
+            connectionId={agent?.connectionId}
           />
         )}
       </section>
