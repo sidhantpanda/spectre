@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"strings"
 	"time"
 
@@ -71,18 +70,21 @@ func connectToControlServer(host, token string) {
 			continue
 		}
 
-		session := newPtySession()
+		sessions := newPtyManager()
 		errCh := make(chan error, 1)
-		startPTY := func(ptm *os.File, stop <-chan struct{}) {
-			go readFromPTY(conn, ptm, stop, errCh)
+		startPTY := func(session *ptySession) {
+			go readFromPTY(conn, session, errCh)
 		}
-		go readFromControl(conn, session, errCh, startPTY)
+		// Ensure there is always a default session available when the control server
+		// does not send an explicit session identifier (e.g., legacy clients).
+		sessions.reset("default")
+		go readFromControl(conn, sessions, errCh, startPTY)
 		go sendHeartbeats(conn, errCh)
 
 		if err := <-errCh; err != nil {
 			log.Printf("control server connection closed: %v", err)
 		}
-		session.close()
+		sessions.closeAll()
 		conn.Close()
 
 		backoff = nextBackoff(backoff)

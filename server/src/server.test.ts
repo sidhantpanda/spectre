@@ -6,7 +6,12 @@ import { AgentRecord } from "./types";
 describe("createApp routes", () => {
   let listAgents = vi.fn<[], AgentRecord[]>();
   let connectToAgent = vi.fn<(address: string, token: string) => AgentRecord>();
-  let pushToAgent = vi.fn<(id: string, message: { type: "keystroke"; data: string } | { type: "reset" }) => void>();
+  let pushToAgent = vi.fn<
+    (
+      id: string,
+      message: { type: "keystroke"; data: string; sessionId?: string } | { type: "reset"; sessionId?: string },
+    ) => void
+  >();
 
   beforeEach(() => {
     listAgents = vi.fn(() => []);

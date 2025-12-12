@@ -24,7 +24,7 @@ type AgentEntry = {
 };
 
 const agents: Map<string, AgentEntry> = new Map();
-const uiClients: Map<string, Set<WebSocket>> = new Map();
+const uiClients: Map<string, Map<string, WebSocket>> = new Map();
 const agentEventClients: Set<WebSocket> = new Set();
 
 type AgentDependencies = {
@@ -212,7 +212,18 @@ function broadcastToUi(agentId: string, payload: { type: string; [key: string]: 
     // No UI subscribers; skip fan-out but avoid noise.
     return;
   }
-  for (const socket of clients) {
+
+  const targetSession = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
+
+  if (targetSession) {
+    const socket = clients.get(targetSession);
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(payload));
+    }
+    return;
+  }
+
+  for (const socket of clients.values()) {
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(payload));
     }
@@ -285,8 +296,12 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
       return;
     }
 
-    const count = (uiClients.get(agentId)?.size ?? 0) + 1;
-    console.log(`[ui terminal] connected for agent ${agentId} (viewers=${count})`);
+    const sessions = uiClients.get(agentId) ?? new Map<string, WebSocket>();
+    const sessionId = uuid();
+    sessions.set(sessionId, socket);
+    uiClients.set(agentId, sessions);
+
+    console.log(`[ui terminal] connected for agent ${agentId} (viewers=${sessions.size})`);
 
     socket.send(
       JSON.stringify({
@@ -295,16 +310,13 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
         fingerprint: entry.record.fingerprint,
         remoteAgentId: entry.record.remoteAgentId,
         agentId: entry.record.id,
-        connectionId: entry.record.connectionId,
+        connectionId: sessionId,
+        sessionId,
       }),
     );
 
-    const group = uiClients.get(agentId) ?? new Set<WebSocket>();
-    group.add(socket);
-    uiClients.set(agentId, group);
-
     try {
-      pushToAgent(agentId, { type: "reset" });
+      pushToAgent(agentId, { type: "reset", sessionId });
     } catch (err) {
       socket.send(JSON.stringify({ type: "error", message: (err as Error).message }));
     }
@@ -313,19 +325,22 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
       try {
         const parsed = JSON.parse(data.toString()) as { type?: string; data?: string };
         if (parsed.type !== "input" || typeof parsed.data !== "string") return;
-        pushToAgent(agentId, { type: "keystroke", data: parsed.data });
+        pushToAgent(agentId, { type: "keystroke", data: parsed.data, sessionId });
       } catch (err) {
         socket.send(JSON.stringify({ type: "error", message: (err as Error).message }));
       }
     });
 
     socket.on("close", () => {
-      group.delete(socket);
-      if (group.size === 0) {
-        uiClients.delete(agentId);
-        console.log(`[ui terminal] disconnected for agent ${agentId} (viewers=0)`);
-      } else {
-        console.log(`[ui terminal] disconnected for agent ${agentId} (viewers=${group.size})`);
+      const currentSessions = uiClients.get(agentId);
+      if (currentSessions) {
+        currentSessions.delete(sessionId);
+        if (currentSessions.size === 0) {
+          uiClients.delete(agentId);
+          console.log(`[ui terminal] disconnected for agent ${agentId} (viewers=0)`);
+        } else {
+          console.log(`[ui terminal] disconnected for agent ${agentId} (viewers=${currentSessions.size})`);
+        }
       }
     });
   });

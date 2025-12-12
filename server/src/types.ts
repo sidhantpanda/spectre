@@ -21,10 +21,10 @@ export interface AgentRecord {
 
 export type ControlMessage =
   | { type: "hello"; token: string }
-  | { type: "keystroke"; data: string }
-  | { type: "reset" };
+  | { type: "keystroke"; data: string; sessionId?: string }
+  | { type: "reset"; sessionId?: string };
 
 export type AgentMessage =
   | { type: "hello"; agentId: string; fingerprint: AgentFingerprint }
-  | { type: "output"; data: string }
+  | { type: "output"; data: string; sessionId?: string }
   | { type: "heartbeat" };

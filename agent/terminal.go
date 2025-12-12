@@ -33,15 +33,17 @@ func startShell() *os.File {
 }
 
 type ptySession struct {
-	mu   sync.RWMutex
-	ptm  *os.File
-	stop chan struct{}
+	mu        sync.RWMutex
+	ptm       *os.File
+	stop      chan struct{}
+	sessionID string
 }
 
-func newPtySession() *ptySession {
+func newPtySession(sessionID string) *ptySession {
 	return &ptySession{
-		ptm:  nil,
-		stop: make(chan struct{}),
+		ptm:       nil,
+		stop:      make(chan struct{}),
+		sessionID: sessionID,
 	}
 }
 
@@ -74,6 +76,47 @@ func (s *ptySession) reset() *os.File {
 	return s.ptm
 }
 
+type ptyManager struct {
+	mu       sync.RWMutex
+	sessions map[string]*ptySession
+}
+
+func newPtyManager() *ptyManager {
+	return &ptyManager{sessions: make(map[string]*ptySession)}
+}
+
+func (m *ptyManager) get(sessionID string) *ptySession {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.sessions[sessionID]
+}
+
+func (m *ptyManager) reset(sessionID string) *ptySession {
+	m.mu.Lock()
+	session, ok := m.sessions[sessionID]
+	if !ok {
+		session = newPtySession(sessionID)
+		m.sessions[sessionID] = session
+	}
+	m.mu.Unlock()
+
+	session.reset()
+	return session
+}
+
+func (m *ptyManager) closeAll() {
+	m.mu.RLock()
+	sessions := make([]*ptySession, 0, len(m.sessions))
+	for _, session := range m.sessions {
+		sessions = append(sessions, session)
+	}
+	m.mu.RUnlock()
+
+	for _, session := range sessions {
+		session.close()
+	}
+}
+
 func (s *ptySession) close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -88,7 +131,7 @@ func (s *ptySession) close() {
 	}
 }
 
-func readFromControl(conn *websocket.Conn, session *ptySession, errCh chan<- error, restartPTY func(*os.File, <-chan struct{})) {
+func readFromControl(conn *websocket.Conn, sessions *ptyManager, errCh chan<- error, restartPTY func(*ptySession)) {
 	for {
 		var msg ControlMessage
 		if err := conn.ReadJSON(&msg); err != nil {
@@ -96,38 +139,47 @@ func readFromControl(conn *websocket.Conn, session *ptySession, errCh chan<- err
 			return
 		}
 
+		sessionID := msg.SessionID
+		if sessionID == "" {
+			sessionID = "default"
+		}
+
 		switch msg.Type {
 		case "keystroke":
+			session := sessions.get(sessionID)
+			if session == nil {
+				log.Printf("ignoring keystroke for unknown session %s", sessionID)
+				continue
+			}
 			ptm := session.current()
 			if ptm == nil {
-				errCh <- fmt.Errorf("no active pty (reset not requested yet)")
-				return
+				log.Printf("ignoring keystroke for inactive session %s", sessionID)
+				continue
 			}
 			if _, err := ptm.Write([]byte(msg.Data)); err != nil {
 				errCh <- fmt.Errorf("write to pty failed: %w", err)
 				return
 			}
 		case "reset":
-			newPTY := session.reset()
-			if newPTY != nil {
-				restartPTY(newPTY, session.stopChan())
-			}
+			session := sessions.reset(sessionID)
+			restartPTY(session)
 		}
 	}
 }
 
-func readFromPTY(conn *websocket.Conn, ptm *os.File, stop <-chan struct{}, errCh chan<- error) {
+func readFromPTY(conn *websocket.Conn, session *ptySession, errCh chan<- error) {
+	ptm := session.current()
 	reader := bufio.NewReader(ptm)
 	buf := make([]byte, 2048)
 	for {
 		select {
-		case <-stop:
+		case <-session.stopChan():
 			return
 		default:
 		}
 		n, err := reader.Read(buf)
 		if n > 0 {
-			payload := AgentMessage{Type: "output", Data: string(buf[:n])}
+			payload := AgentMessage{Type: "output", Data: string(buf[:n]), SessionID: session.sessionID}
 			if err := conn.WriteJSON(payload); err != nil {
 				errCh <- err
 				return
@@ -135,7 +187,7 @@ func readFromPTY(conn *websocket.Conn, ptm *os.File, stop <-chan struct{}, errCh
 		}
 		if err != nil {
 			select {
-			case <-stop:
+			case <-session.stopChan():
 				return
 			default:
 				errCh <- err
