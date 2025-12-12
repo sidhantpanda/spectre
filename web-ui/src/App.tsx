@@ -9,7 +9,7 @@ import { fetchAgents, subscribeToAgentEvents } from "./state/agents";
 const API_BASE =
   (import.meta.env.VITE_API_BASE as string | undefined) && (import.meta.env.VITE_API_BASE as string).length > 0
     ? (import.meta.env.VITE_API_BASE as string)
-    : "http://localhost:8080";
+    : window.location.origin;
 
 export function formatTimestamp(ts: number) {
   const date = new Date(ts);
