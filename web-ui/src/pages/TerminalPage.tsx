@@ -12,30 +12,41 @@ export default function TerminalPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
-    fetchAgents(API_BASE).then((list) => mounted && setAgents(list)).catch(() => {});
-    const socket = subscribeToAgentEvents(
-      (list) => mounted && setAgents(list),
-      (agent) => {
+    let socket: WebSocket | null = null;
+    fetchAgents(API_BASE)
+      .then((list) => {
         if (!mounted) return;
-        setAgents((prev) => {
-          const next = [...prev];
-          const idx = next.findIndex((a) => a.id === agent.id);
-          if (idx === -1) {
-            next.push(agent);
-          } else {
-            next[idx] = agent;
-          }
-          return next;
-        });
-      },
-      API_BASE,
-    );
+        setAgents(list);
+        setLoadError(null);
+        socket = subscribeToAgentEvents(
+          (agentList) => mounted && setAgents(agentList),
+          (agent) => {
+            if (!mounted) return;
+            setAgents((prev) => {
+              const next = [...prev];
+              const idx = next.findIndex((a) => a.id === agent.id);
+              if (idx === -1) {
+                next.push(agent);
+              } else {
+                next[idx] = agent;
+              }
+              return next;
+            });
+          },
+          API_BASE,
+        );
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setLoadError("Unable to reach control server. Check that it is running and reachable.");
+      });
     return () => {
       mounted = false;
-      socket.close();
+      socket?.close();
     };
   }, []);
 
@@ -63,7 +74,8 @@ export default function TerminalPage() {
         </div>
       </header>
       <section className="mx-auto max-w-5xl px-6 py-6">
-        {!agent && <p className="text-sm text-muted-foreground">Agent not found.</p>}
+        {!agent && !loadError && <p className="text-sm text-muted-foreground">Agent not found.</p>}
+        {loadError && <p className="text-sm text-destructive">{loadError}</p>}
         {agent && (
           <AgentTerminal
             key={currentId}

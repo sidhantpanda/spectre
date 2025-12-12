@@ -71,6 +71,8 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
 
     return () => {
       window.removeEventListener("resize", handleResize);
+      fitRef.current?.dispose();
+      fitRef.current = null;
       termRef.current?.dispose();
       termRef.current = null;
     };
