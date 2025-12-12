@@ -17,36 +17,91 @@ export default function TerminalPage() {
   useEffect(() => {
     let mounted = true;
     let socket: WebSocket | null = null;
+    let retryTimer: number | null = null;
+    let backoff = 1000;
+
+    const cleanupSocket = () => {
+      if (socket) {
+        socket.onopen = null;
+        socket.onclose = null;
+        socket.onerror = null;
+        socket.onmessage = null;
+        socket.close();
+        socket = null;
+      }
+    };
+
+    const scheduleRetry = () => {
+      if (!mounted) return;
+      cleanupSocket();
+      setLoadError("Unable to reach control server. Retrying...");
+      backoff = Math.min(backoff * 2, 5000);
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+      }
+      retryTimer = window.setTimeout(connectEvents, backoff);
+    };
+
+    const connectEvents = () => {
+      if (!mounted) return;
+      cleanupSocket();
+      const ws = subscribeToAgentEvents(
+        (agentList) => mounted && setAgents(agentList),
+        (agent) => {
+          if (!mounted) return;
+          setAgents((prev) => {
+            const next = [...prev];
+            const idx = next.findIndex((a) => a.id === agent.id);
+            if (idx === -1) {
+              next.push(agent);
+            } else {
+              next[idx] = agent;
+            }
+            return next;
+          });
+        },
+        API_BASE,
+      );
+      socket = ws;
+
+      ws.onopen = () => {
+        backoff = 1000;
+        setLoadError(null);
+        fetchAgents(API_BASE)
+          .then((list) => {
+            if (!mounted) return;
+            setAgents(list);
+          })
+          .catch(() => {
+            if (!mounted) return;
+            scheduleRetry();
+          });
+      };
+
+      ws.onerror = scheduleRetry;
+      ws.onclose = scheduleRetry;
+    };
+
     fetchAgents(API_BASE)
       .then((list) => {
         if (!mounted) return;
+        backoff = 1000;
         setAgents(list);
         setLoadError(null);
-        socket = subscribeToAgentEvents(
-          (agentList) => mounted && setAgents(agentList),
-          (agent) => {
-            if (!mounted) return;
-            setAgents((prev) => {
-              const next = [...prev];
-              const idx = next.findIndex((a) => a.id === agent.id);
-              if (idx === -1) {
-                next.push(agent);
-              } else {
-                next[idx] = agent;
-              }
-              return next;
-            });
-          },
-          API_BASE,
-        );
+        connectEvents();
       })
       .catch(() => {
         if (!mounted) return;
-        setLoadError("Unable to reach control server. Check that it is running and reachable.");
+        scheduleRetry();
       });
+
     return () => {
       mounted = false;
-      socket?.close();
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      cleanupSocket();
     };
   }, []);
 
@@ -82,7 +137,7 @@ export default function TerminalPage() {
             agentId={currentId}
             apiBase={API_BASE}
             connectionId={agent.connectionId}
-            enabled={agent.status === "connected"}
+            enabled={agent.status === "connected" && !loadError}
           />
         )}
       </section>
