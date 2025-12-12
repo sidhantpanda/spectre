@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -14,6 +15,35 @@ func main() {
 	token := flag.String("token", "changeme", "Auth token expected from the control server")
 	host := flag.String("host", "", "Optional control server host (ws://host:port/agents/register) to initiate a connection")
 	flag.Parse()
+
+	fingerprint := collectFingerprint()
+	agentID := fingerprint["fingerprint"].(string)
+	connectionURL := buildConnectionURL(*listen)
+
+	instance := AgentInstanceInfo{
+		PID:           os.Getpid(),
+		AgentID:       agentID,
+		Listen:        *listen,
+		ConnectionURL: connectionURL,
+		Host:          *host,
+		Token:         *token,
+	}
+
+	acquired, running, err := ensureSingleInstance(instance)
+	if err != nil {
+		log.Fatalf("failed to check agent instance: %v", err)
+	}
+	if !acquired && running != nil {
+		log.Printf("spectre-agent already running (pid %d)", running.PID)
+		log.Printf("agent id: %s", running.AgentID)
+		log.Printf("control server can connect via: %s", running.ConnectionURL)
+		return
+	}
+	defer func() {
+		if err := releaseSingleton(instance.PID); err != nil {
+			log.Printf("warning: failed to release agent lock: %v", err)
+		}
+	}()
 
 	server := newAgentServer(*listen, *token)
 

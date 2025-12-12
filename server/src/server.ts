@@ -69,6 +69,17 @@ function connectToAgent(address: string, token: string) {
       const payload = JSON.parse(data.toString()) as AgentMessage;
       entry.record.lastSeen = now();
       if (payload.type === "hello") {
+        const existing = activeAgentFor(payload.agentId, id);
+        if (existing) {
+          entry.record.status = "disconnected";
+          entry.record.lastSeen = now();
+          agents.set(id, entry);
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.close(4001, "agent already connected (keeping first session)");
+          }
+          handleAgentStatusChange(entry.record);
+          return;
+        }
         entry.record.status = "connected";
         entry.record.remoteAgentId = payload.agentId;
         entry.record.fingerprint = payload.fingerprint;
@@ -184,6 +195,17 @@ function broadcastAgentEvent(record: AgentRecord) {
   }
 }
 
+function activeAgentFor(remoteAgentId: string | undefined, currentId: string) {
+  if (!remoteAgentId) return undefined;
+  for (const [id, entry] of agents.entries()) {
+    if (id === currentId) continue;
+    if (entry.record.remoteAgentId === remoteAgentId && entry.record.status !== "disconnected") {
+      return { id, entry };
+    }
+  }
+  return undefined;
+}
+
 function handleAgentStatusChange(record: AgentRecord) {
   broadcastToUi(record.id, {
     type: "status",
@@ -289,6 +311,17 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
         entry.record.lastSeen = now();
 
         if (payload.type === "hello") {
+          const existing = activeAgentFor(payload.agentId, id);
+          if (existing) {
+            entry.record.status = "disconnected";
+            entry.record.lastSeen = now();
+            agents.set(id, entry);
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.close(4001, "agent already connected (keeping first session)");
+            }
+            handleAgentStatusChange(entry.record);
+            return;
+          }
           entry.record.status = "connected";
           entry.record.remoteAgentId = payload.agentId;
           entry.record.fingerprint = payload.fingerprint;

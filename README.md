@@ -27,6 +27,7 @@ Both components use WebSockets for interactive keystroke and output streaming. A
    ./spectre-agent -listen :8081 -token changeme \
      -host ws://<control-server-host>:8080/agents/register
    ```
+   Only one agent instance runs per machine; starting another prints the active PID and connection URL for reuse.
 4. In the control server UI, paste the remote agent address (e.g., `ws://<agent-ip>:8081/ws`) and click **Connect**. The control server will dial the agent and forward commands/output through the UI.
 
 The control server now initiates connections to agent API servers, accepts inbound agent-initiated control sessions, maintains an in-memory registry of connection state, and allows pushing keystrokes to live PTY sessions.
