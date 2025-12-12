@@ -7,6 +7,7 @@ type Props = {
   agentId: string;
   apiBase?: string;
   connectionId?: string;
+  enabled?: boolean;
 };
 
 type TerminalMessage =
@@ -22,7 +23,7 @@ function buildSocketUrl(apiBase: string | undefined, agentId: string) {
   return url.toString();
 }
 
-export function AgentTerminal({ agentId, apiBase, connectionId }: Props) {
+export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -31,7 +32,7 @@ export function AgentTerminal({ agentId, apiBase, connectionId }: Props) {
   const [status, setStatus] = useState<"disconnected" | "connecting" | "connected" | "error">("disconnected");
   const [sessionId, setSessionId] = useState(connectionId ?? "");
 
-  // Initialize terminal once.
+  // Initialize the terminal once.
   useEffect(() => {
     if (termRef.current) return;
     const term = new Terminal({
@@ -73,7 +74,19 @@ export function AgentTerminal({ agentId, apiBase, connectionId }: Props) {
     };
   }, []);
 
-  // Reconnect logic when agentId/apiBase/connectionId change.
+  // Register input handler once per agentId change.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    const handler = term.onData((data) => {
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ type: "input", data }));
+      }
+    });
+    return () => handler.dispose();
+  }, [agentId]);
+
+  // Manage socket lifecycle with reconnection/backoff.
   useEffect(() => {
     if (connectionId) setSessionId(connectionId);
     const term = termRef.current;
@@ -82,6 +95,23 @@ export function AgentTerminal({ agentId, apiBase, connectionId }: Props) {
     let cancelled = false;
     let backoff = 1000;
 
+    const cleanupSocket = () => {
+      if (socketRef.current) {
+        socketRef.current.onclose = null;
+        socketRef.current.onerror = null;
+        socketRef.current.onmessage = null;
+        socketRef.current.onopen = null;
+        socketRef.current.close();
+        socketRef.current = null;
+      }
+    };
+
+    if (!enabled) {
+      setStatus("disconnected");
+      cleanupSocket();
+      return () => {};
+    }
+
     const connect = () => {
       if (cancelled) return;
       setStatus("connecting");
@@ -89,12 +119,6 @@ export function AgentTerminal({ agentId, apiBase, connectionId }: Props) {
       socketRef.current = socket;
 
       term.writeln(`\r\n[connecting] ${agentId}`);
-
-      term.onData((data) => {
-        if (socketRef.current?.readyState === WebSocket.OPEN) {
-          socketRef.current.send(JSON.stringify({ type: "input", data }));
-        }
-      });
 
       socket.onopen = () => {
         backoff = 1000;
@@ -156,14 +180,9 @@ export function AgentTerminal({ agentId, apiBase, connectionId }: Props) {
         clearTimeout(reconnectTimer.current);
         reconnectTimer.current = null;
       }
-      if (socketRef.current) {
-        socketRef.current.onclose = null;
-        socketRef.current.onerror = null;
-        socketRef.current.close();
-        socketRef.current = null;
-      }
+      cleanupSocket();
     };
-  }, [agentId, apiBase, connectionId]);
+  }, [agentId, apiBase, connectionId, enabled]);
 
   return (
     <div className="flex flex-col gap-2">

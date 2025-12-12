@@ -5,7 +5,10 @@ import { Button } from "../components/ui/button";
 import { AgentTerminal } from "../components/AgentTerminal";
 import { Agent, fetchAgents, subscribeToAgentEvents } from "../state/agents";
 
-const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || "";
+const API_BASE =
+  (import.meta.env.VITE_API_BASE as string | undefined) && (import.meta.env.VITE_API_BASE as string).length > 0
+    ? (import.meta.env.VITE_API_BASE as string)
+    : "http://localhost:8080";
 
 export default function TerminalPage() {
   const { id } = useParams<{ id: string }>();
@@ -62,13 +65,14 @@ export default function TerminalPage() {
         </div>
       </header>
       <section className="mx-auto max-w-5xl px-6 py-6">
-        {!agent && <p className="text-sm text-muted-foreground">Agent not found (attempting to connect anyway)...</p>}
-        {currentId && (
+        {!agent && <p className="text-sm text-muted-foreground">Agent not found.</p>}
+        {agent && (
           <AgentTerminal
             key={currentId}
             agentId={currentId}
             apiBase={API_BASE}
-            connectionId={agent?.connectionId}
+            connectionId={agent.connectionId}
+            enabled={agent.status === "connected"}
           />
         )}
       </section>

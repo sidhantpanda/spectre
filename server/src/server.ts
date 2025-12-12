@@ -9,6 +9,13 @@ import { AgentMessage, AgentRecord, ControlMessage } from "./types";
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const AUTH_TOKEN = process.env.AGENT_AUTH_TOKEN || "changeme";
 
+function summarizeOutput(data: string) {
+  const withoutAnsi = data.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "");
+  const singleLine = withoutAnsi.replace(/\r/g, " ").replace(/\n/g, "␊").trim();
+  if (singleLine.length === 0) return "";
+  return singleLine.length > 160 ? `${singleLine.slice(0, 160)}…` : singleLine;
+}
+
 type AgentEntry = {
   socket?: WebSocket;
   record: AgentRecord;
@@ -80,6 +87,7 @@ function attemptOutboundConnection(id: string, address: string, backoffMs = 1000
     entry.backoffMs = 1000;
     socket.send(JSON.stringify({ type: "hello", token: entry.token } satisfies ControlMessage));
     handleAgentStatusChange(entry.record);
+    console.log(`[agent outbound] dialed ${address} (id=${id})`);
   });
 
   socket.on("message", (data: RawData) => {
@@ -105,9 +113,10 @@ function attemptOutboundConnection(id: string, address: string, backoffMs = 1000
       }
       if (payload.type === "output") {
         broadcastToUi(id, payload);
-        console.log(
-          `[agent ${entry.record.remoteAgentId ?? entry.record.id}] output: ${payload.data.substring(0, 120)}`,
-        );
+        const summary = summarizeOutput(payload.data);
+        if (summary) {
+          console.log(`[agent ${entry.record.remoteAgentId ?? entry.record.id}] ${payload.data}`);
+        }
       }
       if (payload.type === "heartbeat") {
         entry.record.status = "connected";
@@ -128,11 +137,12 @@ function attemptOutboundConnection(id: string, address: string, backoffMs = 1000
   };
 
   socket.on("close", () => {
+    console.log(`[agent outbound] closed ${address} (id=${id})`);
     scheduleReconnect();
   });
 
   socket.on("error", (err: Error) => {
-    console.warn(`connection error for agent ${id} (${address})`, err);
+    console.warn(`[agent outbound] error ${address} (id=${id}): ${err.message}`);
     scheduleReconnect();
   });
 }
@@ -198,7 +208,10 @@ export function createApp(
 
 function broadcastToUi(agentId: string, payload: { type: string; [key: string]: unknown }) {
   const clients = uiClients.get(agentId);
-  if (!clients) return;
+  if (!clients || clients.size === 0) {
+    // No UI subscribers; skip fan-out but avoid noise.
+    return;
+  }
   for (const socket of clients) {
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(payload));
@@ -272,6 +285,9 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
       return;
     }
 
+    const count = (uiClients.get(agentId)?.size ?? 0) + 1;
+    console.log(`[ui terminal] connected for agent ${agentId} (viewers=${count})`);
+
     socket.send(
       JSON.stringify({
         type: "status",
@@ -307,6 +323,9 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
       group.delete(socket);
       if (group.size === 0) {
         uiClients.delete(agentId);
+        console.log(`[ui terminal] disconnected for agent ${agentId} (viewers=0)`);
+      } else {
+        console.log(`[ui terminal] disconnected for agent ${agentId} (viewers=${group.size})`);
       }
     });
   });
@@ -374,9 +393,10 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
 
         if (payload.type === "output") {
           broadcastToUi(id, payload);
-          console.log(
-            `[agent ${entry.record.remoteAgentId ?? entry.record.id}] output: ${payload.data.substring(0, 120)}`,
-          );
+          const summary = summarizeOutput(payload.data);
+          if (summary) {
+            console.log(`[agent ${entry.record.remoteAgentId ?? entry.record.id}] ${payload.data}`);
+          }
         }
         if (payload.type === "heartbeat") {
           entry.record.status = "connected";
@@ -392,6 +412,7 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
       entry.record.lastSeen = now();
       agents.set(id, entry);
       handleAgentStatusChange(entry.record);
+      console.log(`[agent inbound] closed ${address} (id=${id})`);
     });
 
     socket.on("error", (err: Error) => {
@@ -399,7 +420,7 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
       entry.record.lastSeen = now();
       agents.set(id, entry);
       handleAgentStatusChange(entry.record);
-      console.warn(`connection error for inbound agent ${id} (${address})`, err);
+      console.warn(`[agent inbound] error ${address} (id=${id}): ${err.message}`);
     });
   });
 

@@ -90,7 +90,7 @@ describe("App component", () => {
     fireEvent.click(submit);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/agents/connect", {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "http://localhost:8080/agents/connect", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ address: "ws://test/ws", token: "secret" }),

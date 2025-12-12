@@ -40,7 +40,7 @@ type ptySession struct {
 
 func newPtySession() *ptySession {
 	return &ptySession{
-		ptm:  startShell(),
+		ptm:  nil,
 		stop: make(chan struct{}),
 	}
 }
@@ -100,7 +100,7 @@ func readFromControl(conn *websocket.Conn, session *ptySession, errCh chan<- err
 		case "keystroke":
 			ptm := session.current()
 			if ptm == nil {
-				errCh <- fmt.Errorf("no active pty")
+				errCh <- fmt.Errorf("no active pty (reset not requested yet)")
 				return
 			}
 			if _, err := ptm.Write([]byte(msg.Data)); err != nil {
@@ -109,7 +109,9 @@ func readFromControl(conn *websocket.Conn, session *ptySession, errCh chan<- err
 			}
 		case "reset":
 			newPTY := session.reset()
-			restartPTY(newPTY, session.stopChan())
+			if newPTY != nil {
+				restartPTY(newPTY, session.stopChan())
+			}
 		}
 	}
 }

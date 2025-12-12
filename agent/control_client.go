@@ -71,13 +71,12 @@ func connectToControlServer(host, token string) {
 			continue
 		}
 
-		errCh := make(chan error, 1)
 		session := newPtySession()
+		errCh := make(chan error, 1)
 		startPTY := func(ptm *os.File, stop <-chan struct{}) {
 			go readFromPTY(conn, ptm, stop, errCh)
 		}
 		go readFromControl(conn, session, errCh, startPTY)
-		startPTY(session.current(), session.stopChan())
 		go sendHeartbeats(conn, errCh)
 
 		if err := <-errCh; err != nil {

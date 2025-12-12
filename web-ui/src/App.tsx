@@ -6,7 +6,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./com
 import type { Agent, AgentStatus } from "./state/agents";
 import { fetchAgents, subscribeToAgentEvents } from "./state/agents";
 
-const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || "";
+const API_BASE =
+  (import.meta.env.VITE_API_BASE as string | undefined) && (import.meta.env.VITE_API_BASE as string).length > 0
+    ? (import.meta.env.VITE_API_BASE as string)
+    : "http://localhost:8080";
 
 export function formatTimestamp(ts: number) {
   const date = new Date(ts);
