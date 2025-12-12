@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/gorilla/websocket"
 )
@@ -61,27 +60,24 @@ func newAgentServer(addr, token string) *agentServer {
 			return
 		}
 
-		shell := startShell()
-		defer shell.Close()
-
 		ack := AgentMessage{Type: "hello", AgentID: agentID, Fingerprint: fingerprint}
 		if err := conn.WriteJSON(ack); err != nil {
 			log.Printf("failed to send handshake ack: %v", err)
 			return
 		}
 
-		session := newPtySession()
+		sessions := newPtyManager()
 		errCh := make(chan error, 1)
-		startPTY := func(ptm *os.File, stop <-chan struct{}) {
-			go readFromPTY(conn, ptm, stop, errCh)
+		startPTY := func(session *ptySession) {
+			go readFromPTY(conn, session, errCh)
 		}
-		go readFromControl(conn, session, errCh, startPTY)
+		go readFromControl(conn, sessions, errCh, startPTY)
 		go sendHeartbeats(conn, errCh)
 
 		if err := <-errCh; err != nil {
 			log.Printf("connection closed: %v", err)
 		}
-		session.close()
+		sessions.closeAll()
 	})
 
 	return s

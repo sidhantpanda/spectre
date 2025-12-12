@@ -9,6 +9,8 @@ type ControlMessage struct {
 	Type  string `json:"type"`
 	Token string `json:"token,omitempty"`
 	Data  string `json:"data,omitempty"`
+	// SessionID differentiates simultaneous PTY sessions.
+	SessionID string `json:"sessionId,omitempty"`
 }
 
 // AgentMessage documents what the agent sends to the control server.
@@ -17,4 +19,5 @@ type AgentMessage struct {
 	AgentID     string         `json:"agentId,omitempty"`
 	Fingerprint map[string]any `json:"fingerprint,omitempty"`
 	Data        string         `json:"data,omitempty"`
+	SessionID   string         `json:"sessionId,omitempty"`
 }

@@ -12,8 +12,8 @@ type Props = {
 };
 
 type TerminalMessage =
-  | { type: "output"; data: string }
-  | { type: "status"; status: string; connectionId?: string }
+  | { type: "output"; data: string; sessionId?: string }
+  | { type: "status"; status: string; connectionId?: string; sessionId?: string }
   | { type: "error"; message: string };
 
 export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }: Props) {
@@ -128,8 +128,8 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
           } else if (payload.type === "status") {
             if (payload.status === "connected") {
               setStatus("connected");
-              if (payload.connectionId) {
-                setSessionId(payload.connectionId);
+              if (payload.sessionId || payload.connectionId) {
+                setSessionId(payload.sessionId ?? payload.connectionId ?? "");
               }
             } else if (payload.status === "connecting") {
               setStatus("connecting");
