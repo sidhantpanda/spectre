@@ -71,6 +71,8 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
 
     return () => {
       window.removeEventListener("resize", handleResize);
+      fitRef.current?.dispose();
+      fitRef.current = null;
       termRef.current?.dispose();
       termRef.current = null;
     };
@@ -114,18 +116,24 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
       return () => {};
     }
 
+    const isTermUsable = () => termRef.current === term && !!term.element?.isConnected;
+
     const connect = () => {
       if (cancelled) return;
       setStatus("connecting");
       const socket = new WebSocket(buildWsUrl(`/terminal?id=${encodeURIComponent(agentId)}`, apiBase));
       socketRef.current = socket;
 
-      term.writeln(`\r\n[connecting] ${agentId}`);
+      if (isTermUsable()) {
+        term.writeln(`\r\n[connecting] ${agentId}`);
+      }
 
       socket.onopen = () => {
         backoff = 1000;
         setStatus("connected");
-        term.writeln("\x1b[32mConnected to agent terminal\x1b[0m");
+        if (isTermUsable()) {
+          term.writeln("\x1b[32mConnected to agent terminal\x1b[0m");
+        }
         if (fitRef.current) {
           try {
             fitRef.current.fit();
@@ -138,6 +146,8 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
       socket.onmessage = (evt) => {
         try {
           const payload = JSON.parse(evt.data) as TerminalMessage;
+          if (!isTermUsable()) return;
+
           if (payload.type === "output") {
             term.write(payload.data);
           } else if (payload.type === "status") {
@@ -157,7 +167,9 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
             setStatus("error");
           }
         } catch {
-          term.write(evt.data);
+          if (isTermUsable()) {
+            term.write(evt.data);
+          }
         }
       };
 
@@ -167,7 +179,9 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
           socketRef.current = null;
         }
         setStatus("disconnected");
-        term.writeln("\r\n[disconnected] retrying...");
+        if (isTermUsable()) {
+          term.writeln("\r\n[disconnected] retrying...");
+        }
         backoff = Math.min(backoff * 2, 5000);
         reconnectTimer.current = window.setTimeout(connect, backoff);
       };
@@ -175,7 +189,9 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
       socket.onclose = scheduleReconnect;
       socket.onerror = () => {
         setStatus("error");
-        term.writeln("\r\n[error] Unable to reach terminal backend");
+        if (isTermUsable()) {
+          term.writeln("\r\n[error] Unable to reach terminal backend");
+        }
         scheduleReconnect();
       };
     };
