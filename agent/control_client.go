@@ -1,7 +1,10 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -21,9 +24,20 @@ func connectToControlServer(host, token string) {
 			return
 		}
 
-		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 		if err != nil {
-			log.Printf("failed to connect to control server at %s: %v", wsURL, err)
+			var details string
+			if resp != nil {
+				body, _ := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				trimmed := strings.TrimSpace(string(body))
+				if trimmed != "" {
+					details = fmt.Sprintf(" (HTTP %s: %s)", resp.Status, trimmed)
+				} else {
+					details = fmt.Sprintf(" (HTTP %s)", resp.Status)
+				}
+			}
+			log.Printf("failed to connect to control server at %s: %v%s", wsURL, err, details)
 			backoff = nextBackoff(backoff)
 			time.Sleep(backoff)
 			continue

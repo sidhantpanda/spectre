@@ -4,9 +4,24 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
+# Accept host/token from CLI or environment. If the host includes a token
+# query param, use that as a fallback for the token flag.
+CLI_HOST="${1:-}"
+CLI_TOKEN="${2:-}"
+
+HOST_VALUE="${CLI_HOST:-${AGENT_HOST:-}}"
+TOKEN_VALUE="${CLI_TOKEN:-${AGENT_TOKEN:-}}"
+
+if [[ -z "$TOKEN_VALUE" && "$HOST_VALUE" =~ [\?\&]token=([^&]+) ]]; then
+  TOKEN_VALUE="${BASH_REMATCH[1]}"
+fi
+
 CMD=(go run .)
-if [[ -n "${AGENT_HOST:-}" ]]; then
-  CMD+=(-host "$AGENT_HOST")
+if [[ -n "$HOST_VALUE" ]]; then
+  CMD+=(-host "$HOST_VALUE")
+fi
+if [[ -n "$TOKEN_VALUE" ]]; then
+  CMD+=(-token "$TOKEN_VALUE")
 fi
 
 if command -v watchexec >/dev/null 2>&1; then

@@ -1,4 +1,5 @@
 import express, { type NextFunction, type Request, type Response } from "express";
+import fs from "fs";
 import { createServer, type IncomingMessage } from "http";
 import { type AddressInfo } from "net";
 import WebSocket, { type RawData, WebSocketServer } from "ws";
@@ -238,9 +239,21 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
   const app = createApp();
   const httpServer = createServer(app);
 
-  const uiWss = new WebSocketServer({ server: httpServer, path: "/terminal" });
-  const agentEventsWss = new WebSocketServer({ server: httpServer, path: "/agents/events" });
-  const inboundAgentWss = new WebSocketServer({ server: httpServer, path: "/agents/register" });
+  const uiWss = new WebSocketServer({ noServer: true });
+  const agentEventsWss = new WebSocketServer({ noServer: true });
+  const inboundAgentWss = new WebSocketServer({ noServer: true });
+
+  inboundAgentWss.on("wsClientError", (err: Error, _socket: WebSocket, req: IncomingMessage) => {
+    console.warn(`[agent inbound] wsClientError ${req.url ?? ""}: ${err.message}`);
+    try {
+      fs.appendFileSync(
+        "/tmp/spectre-ws-errors.log",
+        `[${new Date().toISOString()}] ${req.url ?? ""} ${err.message}\n`,
+      );
+    } catch {
+      /* ignore file write errors */
+    }
+  });
 
   uiWss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
     const { searchParams } = new URL(req.url ?? "", `http://${req.headers.host}`);
@@ -298,6 +311,7 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
   });
 
   inboundAgentWss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
+    console.log(`[agent inbound] connection attempt ${req.url ?? ""} from ${inboundAddress(req)}`);
     const { searchParams } = new URL(req.url ?? "", `http://${req.headers.host}`);
     const token = searchParams.get("token") || AUTH_TOKEN;
     if (token !== AUTH_TOKEN) {
@@ -376,6 +390,27 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
       handleAgentStatusChange(entry.record);
       console.warn(`connection error for inbound agent ${id} (${address})`, err);
     });
+  });
+
+  httpServer.on("upgrade", (req: IncomingMessage, socket, head) => {
+    const { pathname } = new URL(req.url ?? "", `http://${req.headers.host}`);
+    const key = req.headers["sec-websocket-key"] ? "present" : "missing";
+    console.log(
+      `[ws upgrade] ${req.method} ${req.url} upgrade=${req.headers.upgrade} version=${req.headers["sec-websocket-version"]} key=${key}`,
+    );
+    if (pathname === "/terminal") {
+      uiWss.handleUpgrade(req, socket, head, (ws) => uiWss.emit("connection", ws, req));
+      return;
+    }
+    if (pathname === "/agents/events") {
+      agentEventsWss.handleUpgrade(req, socket, head, (ws) => agentEventsWss.emit("connection", ws, req));
+      return;
+    }
+    if (pathname === "/agents/register") {
+      inboundAgentWss.handleUpgrade(req, socket, head, (ws) => inboundAgentWss.emit("connection", ws, req));
+      return;
+    }
+    socket.destroy();
   });
 
   httpServer.listen(PORT, () => {

@@ -60,7 +60,7 @@ The resulting `spectre-agent` binary can be dropped into `/usr/local/bin` on Lin
   -token changeme \
   -host ws://control-server:8080/agents/register
 
-For local development, you can also set `AGENT_HOST=ws://localhost:8080/agents/register` and run `./dev.sh` to auto-pass the flag.
+For local development, you can run `./dev.sh ws://localhost:8080/agents/register <token>` (or set `AGENT_HOST`/`AGENT_TOKEN`). The script also extracts `token=` from the URL if present.
 
 If you start a second agent process on the same machine, it will exit and print the existing agent PID, ID, and connection URL so you can connect using the already-running instance.
 ```
