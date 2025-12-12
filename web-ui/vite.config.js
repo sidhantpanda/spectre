@@ -7,6 +7,12 @@ export default defineConfig({
             "/agents": {
                 target: "http://localhost:8080",
                 changeOrigin: true,
+                ws: true,
+            },
+            "/agents/events": {
+                target: "http://localhost:8080",
+                changeOrigin: true,
+                ws: true,
             },
             "/terminal": {
                 target: "http://localhost:8080",
