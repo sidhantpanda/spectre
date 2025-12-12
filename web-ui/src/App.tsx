@@ -4,7 +4,7 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
 import type { Agent, AgentStatus } from "./state/agents";
-import { fetchAgents } from "./state/agents";
+import { fetchAgents, subscribeToAgentEvents } from "./state/agents";
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || "";
 
@@ -37,8 +37,22 @@ function App() {
 
   useEffect(() => {
     loadAgents();
-    const interval = setInterval(loadAgents, 3000);
-    return () => clearInterval(interval);
+    const socket = subscribeToAgentEvents(
+      (list) => setAgents(list),
+      (agent) =>
+        setAgents((prev) => {
+          const next = [...prev];
+          const idx = next.findIndex((a) => a.id === agent.id);
+          if (idx === -1) {
+            next.push(agent);
+          } else {
+            next[idx] = agent;
+          }
+          return next;
+        }),
+      API_BASE,
+    );
+    return () => socket.close();
   }, []);
 
   const connectedAgents = useMemo(() => agents.filter((a) => a.status === "connected"), [agents]);
@@ -57,7 +71,7 @@ function App() {
         body: JSON.stringify({ address, token }),
       });
       setAddress("");
-      await fetchAgents();
+      await loadAgents();
     } catch (err) {
       console.error("failed to connect", err);
     } finally {
@@ -73,7 +87,7 @@ function App() {
             <p className="text-sm font-medium text-muted-foreground">Control server</p>
             <h1 className="text-2xl font-semibold tracking-tight">Spectre Control Panel</h1>
           </div>
-          <Badge variant="outline" className="rounded-full">Agent-initiated connections</Badge>
+          <Badge variant="outline" className="rounded-full">Live inbound + outbound</Badge>
         </div>
       </header>
 
@@ -138,6 +152,9 @@ function App() {
                     <div className="flex items-center gap-2">
                       <Badge variant={statusVariant(agent.status)} className="capitalize">
                         {agent.status}
+                      </Badge>
+                      <Badge variant="secondary" className="capitalize">
+                        {agent.direction}
                       </Badge>
                       <p className="font-medium">{agent.remoteAgentId ?? agent.id}</p>
                     </div>

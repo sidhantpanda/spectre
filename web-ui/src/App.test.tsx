@@ -4,6 +4,27 @@ import { describe, expect, it, vi, beforeEach, afterEach, type Mock } from "vite
 import App, { formatTimestamp, statusVariant } from "./App";
 
 const originalFetch = globalThis.fetch;
+const originalWebSocket = globalThis.WebSocket;
+
+class MockWebSocket {
+  static OPEN = 1;
+  readyState = MockWebSocket.OPEN;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+  url: string;
+
+  constructor(url: string) {
+    this.url = url;
+  }
+
+  send() {}
+
+  close() {
+    if (this.onclose) {
+      this.onclose(new CloseEvent("close"));
+    }
+  }
+}
 
 describe("App helpers", () => {
   it("formats timestamps in local time", () => {
@@ -25,10 +46,12 @@ describe("App component", () => {
         json: () => Promise.resolve([]),
       }) as unknown as Promise<Response>,
     );
+    globalThis.WebSocket = vi.fn((url: string) => new MockWebSocket(url)) as unknown as typeof WebSocket;
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    globalThis.WebSocket = originalWebSocket;
     vi.restoreAllMocks();
   });
 

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"strings"
 )
 
@@ -43,4 +44,38 @@ func guessLocalIPv4() string {
 		}
 	}
 	return ""
+}
+
+// buildControlServerURL normalizes a control server address into a WebSocket URL
+// the agent can proactively connect to. If no path is provided, it defaults to
+// /agents/register and appends the token as a query parameter.
+func buildControlServerURL(host string, token string) (string, error) {
+	u, err := url.Parse(host)
+	if err != nil {
+		return "", err
+	}
+
+	if u.Scheme == "" {
+		u.Scheme = "ws"
+		u.Host = host
+	}
+
+	if u.Scheme == "http" {
+		u.Scheme = "ws"
+	}
+	if u.Scheme == "https" {
+		u.Scheme = "wss"
+	}
+
+	if u.Path == "" || u.Path == "/" {
+		u.Path = "/agents/register"
+	}
+
+	q := u.Query()
+	if q.Get("token") == "" {
+		q.Set("token", token)
+	}
+	u.RawQuery = q.Encode()
+
+	return u.String(), nil
 }

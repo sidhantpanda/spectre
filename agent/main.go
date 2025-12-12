@@ -12,9 +12,14 @@ import (
 func main() {
 	listen := flag.String("listen", ":8081", "Address for the agent API and WebSocket server")
 	token := flag.String("token", "changeme", "Auth token expected from the control server")
+	host := flag.String("host", "", "Optional control server host (ws://host:port/agents/register) to initiate a connection")
 	flag.Parse()
 
 	server := newAgentServer(*listen, *token)
+
+	if *host != "" {
+		go connectToControlServer(*host, *token)
+	}
 
 	go func() {
 		if err := server.start(); err != nil {

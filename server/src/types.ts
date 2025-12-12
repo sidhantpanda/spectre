@@ -1,4 +1,5 @@
 export type AgentStatus = "connecting" | "connected" | "disconnected";
+export type AgentDirection = "inbound" | "outbound";
 
 export interface AgentFingerprint {
   hostname: string;
@@ -14,6 +15,7 @@ export interface AgentRecord {
   lastSeen: number;
   fingerprint?: AgentFingerprint;
   remoteAgentId?: string;
+  direction: AgentDirection;
 }
 
 export type ControlMessage =

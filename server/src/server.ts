@@ -2,7 +2,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { createServer, type IncomingMessage } from "http";
 import WebSocket, { type RawData, WebSocketServer } from "ws";
 import { v4 as uuid } from "uuid";
-import { AgentMessage, AgentRecord, AgentStatus, ControlMessage } from "./types";
+import { AgentMessage, AgentRecord, ControlMessage } from "./types";
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const AUTH_TOKEN = process.env.AGENT_AUTH_TOKEN || "changeme";
@@ -15,6 +15,7 @@ type AgentEntry = {
 
 const agents: Map<string, AgentEntry> = new Map();
 const uiClients: Map<string, Set<WebSocket>> = new Map();
+const agentEventClients: Set<WebSocket> = new Set();
 
 type AgentDependencies = {
   listAgents: () => AgentRecord[];
@@ -24,6 +25,12 @@ type AgentDependencies = {
 
 function now() {
   return Date.now();
+}
+
+function inboundAddress(req: IncomingMessage) {
+  const ip = req.socket.remoteAddress ?? "inbound";
+  const port = req.socket.remotePort;
+  return port ? `${ip}:${port}` : ip;
 }
 
 function listAgents() {
@@ -43,6 +50,7 @@ function connectToAgent(address: string, token: string) {
       address,
       status: "connecting",
       lastSeen: now(),
+      direction: "outbound",
     },
   };
   agents.set(id, entry);
@@ -52,7 +60,7 @@ function connectToAgent(address: string, token: string) {
 
   socket.on("open", () => {
     socket.send(JSON.stringify({ type: "hello", token } satisfies ControlMessage));
-    handleAgentStatusChange(id, "connecting");
+    handleAgentStatusChange(entry.record);
   });
 
   socket.on("message", (data: RawData) => {
@@ -63,7 +71,7 @@ function connectToAgent(address: string, token: string) {
         entry.record.status = "connected";
         entry.record.remoteAgentId = payload.agentId;
         entry.record.fingerprint = payload.fingerprint;
-        handleAgentStatusChange(id, "connected", payload.fingerprint, payload.agentId);
+        handleAgentStatusChange(entry.record);
       }
       if (payload.type === "output") {
         broadcastToUi(id, payload);
@@ -84,14 +92,14 @@ function connectToAgent(address: string, token: string) {
     entry.record.status = "disconnected";
     entry.record.lastSeen = now();
     agents.set(id, entry);
-    handleAgentStatusChange(id, "disconnected");
+    handleAgentStatusChange(entry.record);
   });
 
   socket.on("error", (err: Error) => {
     entry.record.status = "disconnected";
     entry.record.lastSeen = now();
     agents.set(id, entry);
-    handleAgentStatusChange(id, "disconnected");
+    handleAgentStatusChange(entry.record);
     console.warn(`connection error for agent ${id} (${address})`, err);
   });
 
@@ -167,13 +175,23 @@ function broadcastToUi(agentId: string, payload: { type: string; [key: string]: 
   }
 }
 
-function handleAgentStatusChange(
-  agentId: string,
-  status: AgentStatus,
-  fingerprint?: AgentRecord["fingerprint"],
-  remoteAgentId?: string,
-) {
-  broadcastToUi(agentId, { type: "status", status, fingerprint, remoteAgentId, agentId });
+function broadcastAgentEvent(record: AgentRecord) {
+  for (const socket of agentEventClients) {
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "agent", agent: record }));
+    }
+  }
+}
+
+function handleAgentStatusChange(record: AgentRecord) {
+  broadcastToUi(record.id, {
+    type: "status",
+    status: record.status,
+    fingerprint: record.fingerprint,
+    remoteAgentId: record.remoteAgentId,
+    agentId: record.id,
+  });
+  broadcastAgentEvent(record);
 }
 
 // Only start the HTTP server when running the actual app, not during tests.
@@ -182,6 +200,8 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
   const httpServer = createServer(app);
 
   const uiWss = new WebSocketServer({ server: httpServer, path: "/terminal" });
+  const agentEventsWss = new WebSocketServer({ server: httpServer, path: "/agents/events" });
+  const inboundAgentWss = new WebSocketServer({ server: httpServer, path: "/agents/register" });
 
   uiWss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
     const { searchParams } = new URL(req.url ?? "", `http://${req.headers.host}`);
@@ -226,6 +246,85 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
       if (group.size === 0) {
         uiClients.delete(agentId);
       }
+    });
+  });
+
+  agentEventsWss.on("connection", (socket: WebSocket) => {
+    agentEventClients.add(socket);
+    socket.send(JSON.stringify({ type: "agents", agents: listAgents() }));
+
+    socket.on("close", () => {
+      agentEventClients.delete(socket);
+    });
+  });
+
+  inboundAgentWss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
+    const { searchParams } = new URL(req.url ?? "", `http://${req.headers.host}`);
+    const token = searchParams.get("token") || AUTH_TOKEN;
+    if (token !== AUTH_TOKEN) {
+      socket.close(4401, "invalid token");
+      return;
+    }
+
+    const id = uuid();
+    const address = inboundAddress(req);
+    const entry: AgentEntry = {
+      socket,
+      token,
+      record: {
+        id,
+        address,
+        status: "connecting",
+        lastSeen: now(),
+        direction: "inbound",
+      },
+    };
+    agents.set(id, entry);
+    handleAgentStatusChange(entry.record);
+
+    socket.on("message", (data: RawData) => {
+      try {
+        const payload = JSON.parse(data.toString()) as AgentMessage;
+        entry.record.lastSeen = now();
+
+        if (payload.type === "hello") {
+          entry.record.status = "connected";
+          entry.record.remoteAgentId = payload.agentId;
+          entry.record.fingerprint = payload.fingerprint;
+          agents.set(id, entry);
+          socket.send(JSON.stringify({ type: "hello", token } satisfies ControlMessage));
+          handleAgentStatusChange(entry.record);
+          return;
+        }
+
+        if (payload.type === "output") {
+          broadcastToUi(id, payload);
+          console.log(
+            `[agent ${entry.record.remoteAgentId ?? entry.record.id}] output: ${payload.data.substring(0, 120)}`,
+          );
+        }
+        if (payload.type === "heartbeat") {
+          entry.record.status = "connected";
+        }
+        agents.set(id, entry);
+      } catch (err) {
+        console.error("invalid message from inbound agent", err);
+      }
+    });
+
+    socket.on("close", () => {
+      entry.record.status = "disconnected";
+      entry.record.lastSeen = now();
+      agents.set(id, entry);
+      handleAgentStatusChange(entry.record);
+    });
+
+    socket.on("error", (err: Error) => {
+      entry.record.status = "disconnected";
+      entry.record.lastSeen = now();
+      agents.set(id, entry);
+      handleAgentStatusChange(entry.record);
+      console.warn(`connection error for inbound agent ${id} (${address})`, err);
     });
   });
 

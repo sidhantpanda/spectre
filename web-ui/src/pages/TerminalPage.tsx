@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { AgentTerminal } from "../components/AgentTerminal";
-import { Agent, fetchAgents } from "../state/agents";
+import { Agent, fetchAgents, subscribeToAgentEvents } from "../state/agents";
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || "";
 
@@ -15,14 +15,26 @@ export default function TerminalPage() {
   useEffect(() => {
     let mounted = true;
     fetchAgents(API_BASE).then((list) => mounted && setAgents(list)).catch(() => {});
-    const interval = setInterval(() => {
-      fetchAgents(API_BASE)
-        .then((list) => mounted && setAgents(list))
-        .catch(() => {});
-    }, 3000);
+    const socket = subscribeToAgentEvents(
+      (list) => mounted && setAgents(list),
+      (agent) => {
+        if (!mounted) return;
+        setAgents((prev) => {
+          const next = [...prev];
+          const idx = next.findIndex((a) => a.id === agent.id);
+          if (idx === -1) {
+            next.push(agent);
+          } else {
+            next[idx] = agent;
+          }
+          return next;
+        });
+      },
+      API_BASE,
+    );
     return () => {
       mounted = false;
-      clearInterval(interval);
+      socket.close();
     };
   }, []);
 
