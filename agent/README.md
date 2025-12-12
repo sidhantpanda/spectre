@@ -5,6 +5,7 @@ A lightweight Go daemon that exposes an HTTP + WebSocket API so the Spectre cont
 ## Features
 - Listens for control connections over WebSockets with a shared auth token.
 - Sends a unique fingerprint derived from machine ID, MAC addresses, and NIC names to identify reinstalls.
+- Optionally initiates a control connection itself when given a control server `-host` URL.
 - Spawns a login shell inside a PTY to support interactive sessions (sudo prompts, terminal control codes, etc.).
 - Streams keystrokes from the server to the PTY and streams output back to the server.
 - Handles SIGINT/SIGTERM for clean shutdowns.
@@ -55,12 +56,16 @@ The resulting `spectre-agent` binary can be dropped into `/usr/local/bin` on Lin
 ```bash
 ./spectre-agent \
   -listen :8081 \
-  -token changeme
+  -token changeme \
+  -host ws://control-server:8080/agents/register
+
+For local development, you can also set `AGENT_HOST=ws://localhost:8080/agents/register` and run `./dev.sh` to auto-pass the flag.
 ```
 
 Flags:
 - `-listen` — Address to expose the agent API and WebSocket endpoint (default `:8081`).
 - `-token` — Shared auth token expected from the control server.
+- `-host` — Optional control server WebSocket endpoint for agent-initiated connections (e.g., `ws://control:8080/agents/register`).
 
 ## Notes
 - PTY mode enables proper handling of `sudo` password prompts and interactive programs.

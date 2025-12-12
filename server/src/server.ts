@@ -1,5 +1,6 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 import { createServer, type IncomingMessage } from "http";
+import { type AddressInfo } from "net";
 import WebSocket, { type RawData, WebSocketServer } from "ws";
 import { v4 as uuid } from "uuid";
 import { AgentMessage, AgentRecord, ControlMessage } from "./types";
@@ -330,5 +331,14 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
 
   httpServer.listen(PORT, () => {
     console.log(`Spectre control server listening on :${PORT}`);
+    const addr = httpServer.address();
+    if (addr && typeof addr === "object") {
+      const { address, port } = addr as AddressInfo;
+      const host = address === "::" || address === "0.0.0.0" ? "localhost" : address;
+      const wsURL = `ws://${host}:${port}/agents/register`;
+      console.log(`Agents can initiate inbound control with: ./spectre-agent -host ${wsURL} -token ${AUTH_TOKEN}`);
+    } else {
+      console.log(`Agents can initiate inbound control using /agents/register with token ${AUTH_TOKEN}`);
+    }
   });
 }

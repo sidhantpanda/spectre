@@ -5,6 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
 CMD=(go run .)
+if [[ -n "${AGENT_HOST:-}" ]]; then
+  CMD+=(-host "$AGENT_HOST")
+fi
 
 if command -v watchexec >/dev/null 2>&1; then
   echo "[dev] watching Go files with watchexec (auto-reload enabled)"
