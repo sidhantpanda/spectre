@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+import { buildWsUrl } from "../lib/api";
 
 type Props = {
   agentId: string;
@@ -14,14 +15,6 @@ type TerminalMessage =
   | { type: "output"; data: string }
   | { type: "status"; status: string; connectionId?: string }
   | { type: "error"; message: string };
-
-function buildSocketUrl(apiBase: string | undefined, agentId: string) {
-  const base = apiBase && apiBase.length > 0 ? apiBase : window.location.origin;
-  const url = new URL("/terminal", base);
-  url.protocol = url.protocol.replace("http", "ws");
-  url.searchParams.set("id", agentId);
-  return url.toString();
-}
 
 export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -115,7 +108,7 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
     const connect = () => {
       if (cancelled) return;
       setStatus("connecting");
-      const socket = new WebSocket(buildSocketUrl(apiBase, agentId));
+      const socket = new WebSocket(buildWsUrl(`/terminal?id=${encodeURIComponent(agentId)}`, apiBase));
       socketRef.current = socket;
 
       term.writeln(`\r\n[connecting] ${agentId}`);

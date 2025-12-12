@@ -5,11 +5,9 @@ import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
 import type { Agent, AgentStatus } from "./state/agents";
 import { fetchAgents, subscribeToAgentEvents } from "./state/agents";
+import { getApiBase } from "./lib/api";
 
-const API_BASE =
-  (import.meta.env.VITE_API_BASE as string | undefined) && (import.meta.env.VITE_API_BASE as string).length > 0
-    ? (import.meta.env.VITE_API_BASE as string)
-    : window.location.origin;
+const API_BASE = getApiBase();
 
 export function formatTimestamp(ts: number) {
   const date = new Date(ts);

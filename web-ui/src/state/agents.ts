@@ -1,7 +1,6 @@
-const API_BASE =
-  (import.meta.env.VITE_API_BASE as string | undefined) && (import.meta.env.VITE_API_BASE as string).length > 0
-    ? (import.meta.env.VITE_API_BASE as string)
-    : window.location.origin;
+import { buildWsUrl, getApiBase } from "../lib/api";
+
+const API_BASE = getApiBase();
 
 export type AgentStatus = "connecting" | "connected" | "disconnected";
 export type AgentDirection = "inbound" | "outbound";
@@ -35,10 +34,7 @@ export type AgentEvent =
   | { type: "agent"; agent: Agent };
 
 function buildAgentEventsUrl(apiBase: string = API_BASE) {
-  const base = apiBase && apiBase.length > 0 ? apiBase : window.location.origin;
-  const url = new URL("/agents/events", base);
-  url.protocol = url.protocol.replace("http", "ws");
-  return url.toString();
+  return buildWsUrl("/agents/events", apiBase);
 }
 
 export function subscribeToAgentEvents(

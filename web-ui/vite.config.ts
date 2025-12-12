@@ -13,6 +13,12 @@ export default defineConfig({
         ws: true,
         secure: false,
       },
+      "/agents/events": {
+        target: CONTROL_SERVER_TARGET,
+        changeOrigin: true,
+        ws: true,
+        secure: false,
+      },
       "/terminal": {
         target: CONTROL_SERVER_TARGET,
         changeOrigin: true,
