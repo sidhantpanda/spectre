@@ -12,6 +12,7 @@ type AgentEntry = {
   socket?: WebSocket;
   record: AgentRecord;
   token: string;
+  backoffMs?: number;
 };
 
 const agents: Map<string, AgentEntry> = new Map();
@@ -56,11 +57,25 @@ function connectToAgent(address: string, token: string) {
   };
   agents.set(id, entry);
 
+  attemptOutboundConnection(id, address);
+  return entry.record;
+}
+
+function attemptOutboundConnection(id: string, address: string, backoffMs = 1000) {
+  const entry = agents.get(id);
+  if (!entry) return;
+  entry.backoffMs = backoffMs;
+  entry.record.status = "connecting";
+  entry.record.lastSeen = now();
+  agents.set(id, entry);
+  handleAgentStatusChange(entry.record);
+
   const socket = new WebSocket(address);
   entry.socket = socket;
 
   socket.on("open", () => {
-    socket.send(JSON.stringify({ type: "hello", token } satisfies ControlMessage));
+    entry.backoffMs = 1000;
+    socket.send(JSON.stringify({ type: "hello", token: entry.token } satisfies ControlMessage));
     handleAgentStatusChange(entry.record);
   });
 
@@ -100,22 +115,23 @@ function connectToAgent(address: string, token: string) {
     }
   });
 
-  socket.on("close", () => {
+  const scheduleReconnect = () => {
     entry.record.status = "disconnected";
     entry.record.lastSeen = now();
     agents.set(id, entry);
     handleAgentStatusChange(entry.record);
+    const nextBackoff = Math.min((entry.backoffMs ?? 1000) * 2, 30000);
+    setTimeout(() => attemptOutboundConnection(id, address, nextBackoff), entry.backoffMs ?? 1000);
+  };
+
+  socket.on("close", () => {
+    scheduleReconnect();
   });
 
   socket.on("error", (err: Error) => {
-    entry.record.status = "disconnected";
-    entry.record.lastSeen = now();
-    agents.set(id, entry);
-    handleAgentStatusChange(entry.record);
     console.warn(`connection error for agent ${id} (${address})`, err);
+    scheduleReconnect();
   });
-
-  return entry.record;
 }
 
 function pushToAgent(agentId: string, message: ControlMessage) {
