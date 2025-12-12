@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"time"
 
@@ -31,7 +32,63 @@ func startShell() *os.File {
 	return ptm
 }
 
-func readFromControl(conn *websocket.Conn, ptm *os.File, errCh chan<- error) {
+type ptySession struct {
+	mu   sync.RWMutex
+	ptm  *os.File
+	stop chan struct{}
+}
+
+func newPtySession() *ptySession {
+	return &ptySession{
+		ptm:  startShell(),
+		stop: make(chan struct{}),
+	}
+}
+
+func (s *ptySession) current() *os.File {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ptm
+}
+
+func (s *ptySession) stopChan() <-chan struct{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.stop
+}
+
+// reset starts a fresh shell, stops the current PTY reader, and returns the new PTY.
+func (s *ptySession) reset() *os.File {
+	s.mu.Lock()
+	oldStop := s.stop
+	old := s.ptm
+	// replace stop channel so PTY reader can exit quietly
+	s.stop = make(chan struct{})
+	s.ptm = startShell()
+	s.mu.Unlock()
+
+	close(oldStop)
+	if old != nil {
+		_ = old.Close()
+	}
+	return s.ptm
+}
+
+func (s *ptySession) close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case <-s.stop:
+	default:
+		close(s.stop)
+	}
+	if s.ptm != nil {
+		_ = s.ptm.Close()
+		s.ptm = nil
+	}
+}
+
+func readFromControl(conn *websocket.Conn, session *ptySession, errCh chan<- error, restartPTY func(*os.File, <-chan struct{})) {
 	for {
 		var msg ControlMessage
 		if err := conn.ReadJSON(&msg); err != nil {
@@ -41,18 +98,31 @@ func readFromControl(conn *websocket.Conn, ptm *os.File, errCh chan<- error) {
 
 		switch msg.Type {
 		case "keystroke":
+			ptm := session.current()
+			if ptm == nil {
+				errCh <- fmt.Errorf("no active pty")
+				return
+			}
 			if _, err := ptm.Write([]byte(msg.Data)); err != nil {
 				errCh <- fmt.Errorf("write to pty failed: %w", err)
 				return
 			}
+		case "reset":
+			newPTY := session.reset()
+			restartPTY(newPTY, session.stopChan())
 		}
 	}
 }
 
-func readFromPTY(conn *websocket.Conn, ptm *os.File, errCh chan<- error) {
+func readFromPTY(conn *websocket.Conn, ptm *os.File, stop <-chan struct{}, errCh chan<- error) {
 	reader := bufio.NewReader(ptm)
 	buf := make([]byte, 2048)
 	for {
+		select {
+		case <-stop:
+			return
+		default:
+		}
 		n, err := reader.Read(buf)
 		if n > 0 {
 			payload := AgentMessage{Type: "output", Data: string(buf[:n])}
@@ -62,8 +132,13 @@ func readFromPTY(conn *websocket.Conn, ptm *os.File, errCh chan<- error) {
 			}
 		}
 		if err != nil {
-			errCh <- err
-			return
+			select {
+			case <-stop:
+				return
+			default:
+				errCh <- err
+				return
+			}
 		}
 	}
 }

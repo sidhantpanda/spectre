@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -70,17 +71,19 @@ func connectToControlServer(host, token string) {
 			continue
 		}
 
-		shell := startShell()
-
 		errCh := make(chan error, 1)
-		go readFromControl(conn, shell, errCh)
-		go readFromPTY(conn, shell, errCh)
+		session := newPtySession()
+		startPTY := func(ptm *os.File, stop <-chan struct{}) {
+			go readFromPTY(conn, ptm, stop, errCh)
+		}
+		go readFromControl(conn, session, errCh, startPTY)
+		startPTY(session.current(), session.stopChan())
 		go sendHeartbeats(conn, errCh)
 
 		if err := <-errCh; err != nil {
 			log.Printf("control server connection closed: %v", err)
 		}
-		shell.Close()
+		session.close()
 		conn.Close()
 
 		backoff = nextBackoff(backoff)

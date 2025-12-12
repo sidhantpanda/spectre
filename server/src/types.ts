@@ -20,7 +20,8 @@ export interface AgentRecord {
 
 export type ControlMessage =
   | { type: "hello"; token: string }
-  | { type: "keystroke"; data: string };
+  | { type: "keystroke"; data: string }
+  | { type: "reset" };
 
 export type AgentMessage =
   | { type: "hello"; agentId: string; fingerprint: AgentFingerprint }

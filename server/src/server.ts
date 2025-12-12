@@ -283,6 +283,12 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
     group.add(socket);
     uiClients.set(agentId, group);
 
+    try {
+      deps.pushToAgent(agentId, { type: "reset" });
+    } catch (err) {
+      socket.send(JSON.stringify({ type: "error", message: (err as Error).message }));
+    }
+
     socket.on("message", (data: RawData) => {
       try {
         const parsed = JSON.parse(data.toString()) as { type?: string; data?: string };

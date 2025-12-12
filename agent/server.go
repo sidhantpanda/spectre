@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/gorilla/websocket"
 )
@@ -70,13 +71,18 @@ func newAgentServer(addr, token string) *agentServer {
 		}
 
 		errCh := make(chan error, 1)
-		go readFromControl(conn, shell, errCh)
-		go readFromPTY(conn, shell, errCh)
+		session := newPtySession()
+		startPTY := func(ptm *os.File, stop <-chan struct{}) {
+			go readFromPTY(conn, ptm, stop, errCh)
+		}
+		go readFromControl(conn, session, errCh, startPTY)
+		startPTY(session.current(), session.stopChan())
 		go sendHeartbeats(conn, errCh)
 
 		if err := <-errCh; err != nil {
 			log.Printf("connection closed: %v", err)
 		}
+		session.close()
 	})
 
 	return s
