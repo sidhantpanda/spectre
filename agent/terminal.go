@@ -5,32 +5,11 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 )
-
-func startShell() *os.File {
-	c := &syscall.SysProcAttr{Setctty: true, Setsid: true}
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/bash"
-	}
-
-	cmd := exec.Command(shell)
-	cmd.Env = os.Environ()
-	cmd.SysProcAttr = c
-
-	ptm, err := pty.Start(cmd)
-	if err != nil {
-		log.Fatalf("failed to start shell: %v", err)
-	}
-	return ptm
-}
 
 type ptySession struct {
 	mu        sync.RWMutex
