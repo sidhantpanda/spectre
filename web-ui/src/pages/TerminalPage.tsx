@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { AgentTerminal } from "../components/AgentTerminal";
+import { AgentStatusDot } from "../components/AgentStatusDot";
 import { Agent, fetchAgents, subscribeToAgentEvents } from "../state/agents";
 import { getApiBase } from "../lib/api";
 
@@ -121,11 +121,7 @@ export default function TerminalPage() {
               <h1 className="text-xl font-semibold tracking-tight">{agent?.remoteAgentId ?? agent?.id ?? id}</h1>
             </div>
           </div>
-          {agent && (
-            <Badge variant={agent.status === "connected" ? "outline" : "destructive"} className="capitalize">
-              {agent.status}
-            </Badge>
-          )}
+          {agent && <AgentStatusDot status={agent.status} />}
         </div>
       </header>
       <section className="mx-auto max-w-5xl px-6 py-6">

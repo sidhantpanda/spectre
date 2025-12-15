@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach, afterEach, type Mock } from "vitest";
-import App, { formatTimestamp, statusVariant } from "./App";
+import App, { formatTimestamp } from "./App";
 
 const originalFetch = globalThis.fetch;
 const originalWebSocket = globalThis.WebSocket;
@@ -30,12 +30,6 @@ describe("App helpers", () => {
   it("formats timestamps in local time", () => {
     const sample = new Date("2024-01-01T12:00:00Z").getTime();
     expect(formatTimestamp(sample)).toBe(new Date(sample).toLocaleTimeString());
-  });
-
-  it("maps status to badge variants", () => {
-    expect(statusVariant("connected")).toBe("outline");
-    expect(statusVariant("connecting")).toBe("secondary");
-    expect(statusVariant("disconnected")).toBe("destructive");
   });
 });
 

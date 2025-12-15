@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
-import type { Agent, AgentStatus } from "./state/agents";
+import { AgentStatusDot } from "./components/AgentStatusDot";
+import type { Agent } from "./state/agents";
 import { fetchAgents, subscribeToAgentEvents } from "./state/agents";
 import { getApiBase } from "./lib/api";
 
@@ -12,12 +13,6 @@ const API_BASE = getApiBase();
 export function formatTimestamp(ts: number) {
   const date = new Date(ts);
   return date.toLocaleTimeString();
-}
-
-export function statusVariant(status: AgentStatus) {
-  if (status === "connected") return "outline" as const;
-  if (status === "connecting") return "secondary" as const;
-  return "destructive" as const;
 }
 
 function App() {
@@ -151,9 +146,7 @@ function App() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <Badge variant={statusVariant(agent.status)} className="capitalize">
-                        {agent.status}
-                      </Badge>
+                      <AgentStatusDot status={agent.status} />
                       <Badge variant="secondary" className="capitalize">
                         {agent.direction}
                       </Badge>
