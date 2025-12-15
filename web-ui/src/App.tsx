@@ -15,8 +15,35 @@ export function formatTimestamp(ts: number) {
   return date.toLocaleTimeString();
 }
 
-function displayDeviceId(agent: Agent) {
+function deviceKey(agent: Agent) {
   return agent.deviceId ?? agent.remoteAgentId ?? agent.id;
+}
+
+function displayDeviceId(agent: Agent) {
+  return deviceKey(agent);
+}
+
+function dedupeAgents(list: Agent[]) {
+  const priority: Record<Agent["status"], number> = {
+    disconnected: 0,
+    connecting: 1,
+    connected: 2,
+  };
+  const map = new Map<string, Agent>();
+  for (const agent of list) {
+    const key = deviceKey(agent);
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, agent);
+      continue;
+    }
+    const existingScore = priority[existing.status];
+    const nextScore = priority[agent.status];
+    if (nextScore > existingScore || (nextScore === existingScore && agent.lastSeen > existing.lastSeen)) {
+      map.set(key, agent);
+    }
+  }
+  return Array.from(map.values());
 }
 
 function App() {
@@ -55,8 +82,12 @@ function App() {
     return () => socket.close();
   }, []);
 
-  const connectedAgents = useMemo(() => agents.filter((a) => a.status === "connected"), [agents]);
-  const disconnectedAgents = useMemo(() => agents.filter((a) => a.status === "disconnected"), [agents]);
+  const dedupedAgents = useMemo(() => dedupeAgents(agents), [agents]);
+  const connectedAgents = useMemo(() => dedupedAgents.filter((a) => a.status === "connected"), [dedupedAgents]);
+  const disconnectedAgents = useMemo(
+    () => dedupedAgents.filter((a) => a.status === "disconnected"),
+    [dedupedAgents],
+  );
 
   async function handleConnect(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -140,8 +171,8 @@ function App() {
             <CardDescription>Live connections from the control server into agent API servers.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {agents.length === 0 && <p className="text-sm text-muted-foreground">No connections yet.</p>}
-            {agents.map((agent) => (
+            {dedupedAgents.length === 0 && <p className="text-sm text-muted-foreground">No connections yet.</p>}
+            {dedupedAgents.map((agent) => (
               <button
                 key={agent.id}
                 onClick={() => navigate(`/agent/${agent.id}`)}
