@@ -185,15 +185,13 @@ function App() {
                       <Badge variant="secondary" className="capitalize">
                         {agent.direction}
                       </Badge>
-                      <p className="font-medium">{displayDeviceId(agent)}</p>
+                      <p className="font-medium">{agent.fingerprint?.hostname ?? displayDeviceId(agent)}</p>
                     </div>
+                    <p className="text-sm text-muted-foreground">{displayDeviceId(agent)}</p>
                     <p className="text-sm text-muted-foreground">{agent.address}</p>
                   </div>
                   <div className="text-xs text-muted-foreground text-right">
                     <p>Last seen: {formatTimestamp(agent.lastSeen)}</p>
-                    {agent.fingerprint && (
-                      <p>Hostname: {agent.fingerprint.hostname}</p>
-                    )}
                   </div>
                 </div>
               </button>
