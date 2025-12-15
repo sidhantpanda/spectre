@@ -70,6 +70,12 @@ Flags:
 - `-token` — Shared auth token expected from the control server.
 - `-host` — Optional control server WebSocket endpoint for agent-initiated connections (e.g., `ws://control:8080/agents/register`).
 
+## Releases
+- **Tagged releases:** Push a Git tag matching `agent-v*` to trigger `.github/workflows/release-agent.yml`, which cross-compiles the agent (linux/darwin/windows on amd64/arm64) and publishes a GitHub Release with all binaries attached.
+- **Nightly builds:** `.github/workflows/release-agent-nightly.yml` runs at 02:00 UTC (or via “Run workflow”) and publishes a prerelease tagged `agent-nightly-YYYYMMDD` with the same cross-platform binaries.
+- **Manual nightly:** From the GitHub Actions tab, run the “Nightly Agent Release” workflow to produce the latest prerelease artifacts without waiting for the scheduled run.
+- **Manual short-SHA release:** Run the “Manual Agent Release” workflow (`.github/workflows/release-agent-manual.yml`) to publish a release tagged `agent-sha-<short_sha>`, where `<short_sha>` is the 7-character short hash of the commit you triggered from.
+
 ## Notes
 - PTY mode enables proper handling of `sudo` password prompts and interactive programs.
 - The agent keeps running until terminated and will attempt to send heartbeats so the server can mark stale connections.
