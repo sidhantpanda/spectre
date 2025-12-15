@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { AgentTerminal } from "../components/AgentTerminal";
 import { AgentStatusDot } from "../components/AgentStatusDot";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { Agent, fetchAgents, subscribeToAgentEvents } from "../state/agents";
 import { getApiBase } from "../lib/api";
 
@@ -122,7 +123,10 @@ export default function TerminalPage() {
               <h1 className="text-xl font-semibold tracking-tight">{displayId}</h1>
             </div>
           </div>
-          {agent && <AgentStatusDot status={agent.status} />}
+          <div className="flex items-center gap-3">
+            {agent && <AgentStatusDot status={agent.status} />}
+            <ThemeToggle />
+          </div>
         </div>
       </header>
       <section className="mx-auto max-w-5xl px-6 py-6">

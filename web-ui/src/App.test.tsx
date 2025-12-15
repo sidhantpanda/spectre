@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach, afterEach, type Mock } from "vitest";
 import App, { formatTimestamp } from "./App";
+import { ThemeProvider } from "./components/ThemeProvider";
 
 const originalFetch = globalThis.fetch;
 const originalWebSocket = globalThis.WebSocket;
@@ -51,9 +52,11 @@ describe("App component", () => {
 
   it("loads and displays empty state", async () => {
     render(
-      <MemoryRouter>
-        <App />
-      </MemoryRouter>,
+      <ThemeProvider>
+        <MemoryRouter>
+          <App />
+        </MemoryRouter>
+      </ThemeProvider>,
     );
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
@@ -70,9 +73,11 @@ describe("App component", () => {
     fetchMock.mockImplementation(() => responses.shift() as Promise<Response>);
 
     render(
-      <MemoryRouter>
-        <App />
-      </MemoryRouter>,
+      <ThemeProvider>
+        <MemoryRouter>
+          <App />
+        </MemoryRouter>
+      </ThemeProvider>,
     );
 
     const addressInput = screen.getByLabelText(/Agent WebSocket URL/i);

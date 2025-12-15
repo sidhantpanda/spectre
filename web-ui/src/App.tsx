@@ -4,6 +4,7 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
 import { AgentStatusDot } from "./components/AgentStatusDot";
+import { ThemeToggle } from "./components/ThemeToggle";
 import type { Agent } from "./state/agents";
 import { fetchAgents, subscribeToAgentEvents } from "./state/agents";
 import { getApiBase } from "./lib/api";
@@ -118,7 +119,10 @@ function App() {
             <p className="text-sm font-medium text-muted-foreground">Control server</p>
             <h1 className="text-2xl font-semibold tracking-tight">Spectre Control Panel</h1>
           </div>
-          <Badge variant="outline" className="rounded-full">Live inbound + outbound</Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="rounded-full">Live inbound + outbound</Badge>
+            <ThemeToggle />
+          </div>
         </div>
       </header>
 
