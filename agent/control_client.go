@@ -12,9 +12,7 @@ import (
 
 // connectToControlServer dials the control server (when provided via CLI flag)
 // and establishes the same shell bridge used for inbound connections.
-func connectToControlServer(host, token string) {
-	fingerprint := collectFingerprint()
-	agentID := fingerprint["fingerprint"].(string)
+func connectToControlServer(host, token, deviceID string, fingerprint map[string]any) {
 
 	backoff := time.Second
 	for {
@@ -45,7 +43,7 @@ func connectToControlServer(host, token string) {
 
 		log.Printf("connected to control server via %s", wsURL)
 
-		hello := AgentMessage{Type: "hello", AgentID: agentID, Fingerprint: fingerprint}
+		hello := AgentMessage{Type: "hello", AgentID: deviceID, Fingerprint: fingerprint}
 		if err := conn.WriteJSON(hello); err != nil {
 			log.Printf("failed to send handshake to control server: %v", err)
 			conn.Close()

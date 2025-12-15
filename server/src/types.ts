@@ -14,6 +14,7 @@ export interface AgentRecord {
   connectionId: string;
   status: AgentStatus;
   lastSeen: number;
+  deviceId?: string;
   fingerprint?: AgentFingerprint;
   remoteAgentId?: string;
   direction: AgentDirection;

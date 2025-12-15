@@ -16,8 +16,13 @@ func main() {
 	host := flag.String("host", "", "Optional control server host (ws://host:port/agents/register) to initiate a connection")
 	flag.Parse()
 
+	deviceInfo, err := ensureDeviceInfo()
+	if err != nil {
+		log.Fatalf("failed to load device id: %v", err)
+	}
+
 	fingerprint := collectFingerprint()
-	agentID := fingerprint["fingerprint"].(string)
+	agentID := deviceInfo.DeviceID
 	connectionURL := buildConnectionURL(*listen)
 
 	instance := AgentInstanceInfo{
@@ -45,10 +50,10 @@ func main() {
 		}
 	}()
 
-	server := newAgentServer(*listen, *token)
+	server := newAgentServer(*listen, *token, agentID, fingerprint)
 
 	if *host != "" {
-		go connectToControlServer(*host, *token)
+		go connectToControlServer(*host, *token, agentID, fingerprint)
 	}
 
 	go func() {

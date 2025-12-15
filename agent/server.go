@@ -10,23 +10,25 @@ import (
 )
 
 type agentServer struct {
-	addr   string
-	token  string
-	server *http.Server
+	addr        string
+	token       string
+	deviceID    string
+	fingerprint map[string]any
+	server      *http.Server
 }
 
-func newAgentServer(addr, token string) *agentServer {
-	fingerprint := collectFingerprint()
-	agentID := fingerprint["fingerprint"].(string)
-
+func newAgentServer(addr, token, deviceID string, fingerprint map[string]any) *agentServer {
 	connectionURL := buildConnectionURL(addr)
 	log.Printf("auth token: %s", token)
 	log.Printf("connect control server using: %s", connectionURL)
+	log.Printf("device id: %s", deviceID)
 
 	mux := http.NewServeMux()
 	s := &agentServer{
-		addr:  addr,
-		token: token,
+		addr:        addr,
+		token:       token,
+		deviceID:    deviceID,
+		fingerprint: fingerprint,
 		server: &http.Server{
 			Addr:    addr,
 			Handler: mux,
@@ -36,8 +38,9 @@ func newAgentServer(addr, token string) *agentServer {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"agentId":     agentID,
-			"fingerprint": fingerprint,
+			"agentId":     s.deviceID,
+			"deviceId":    s.deviceID,
+			"fingerprint": s.fingerprint,
 		})
 	})
 
@@ -60,7 +63,7 @@ func newAgentServer(addr, token string) *agentServer {
 			return
 		}
 
-		ack := AgentMessage{Type: "hello", AgentID: agentID, Fingerprint: fingerprint}
+		ack := AgentMessage{Type: "hello", AgentID: s.deviceID, Fingerprint: s.fingerprint}
 		if err := conn.WriteJSON(ack); err != nil {
 			log.Printf("failed to send handshake ack: %v", err)
 			return

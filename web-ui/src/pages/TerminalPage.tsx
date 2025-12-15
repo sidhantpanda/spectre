@@ -107,6 +107,7 @@ export default function TerminalPage() {
 
   const agent = useMemo(() => agents.find((a) => a.id === id), [agents, id]);
   const currentId = agent?.id ?? id ?? "";
+  const displayId = agent ? agent.deviceId ?? agent.remoteAgentId ?? agent.id : id ?? "";
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -118,7 +119,7 @@ export default function TerminalPage() {
             </Button>
             <div>
               <p className="text-sm font-medium text-muted-foreground">Agent terminal</p>
-              <h1 className="text-xl font-semibold tracking-tight">{agent?.remoteAgentId ?? agent?.id ?? id}</h1>
+              <h1 className="text-xl font-semibold tracking-tight">{displayId}</h1>
             </div>
           </div>
           {agent && <AgentStatusDot status={agent.status} />}

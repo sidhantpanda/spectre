@@ -18,6 +18,7 @@ export type Agent = {
   address: string;
   status: AgentStatus;
   lastSeen: number;
+  deviceId?: string;
   fingerprint?: AgentFingerprint;
   remoteAgentId?: string;
   direction: AgentDirection;

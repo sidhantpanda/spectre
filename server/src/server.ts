@@ -95,7 +95,8 @@ function attemptOutboundConnection(id: string, address: string, backoffMs = 1000
       const payload = JSON.parse(data.toString()) as AgentMessage;
       entry.record.lastSeen = now();
       if (payload.type === "hello") {
-        const existing = activeAgentFor(payload.agentId, id);
+        const deviceId = payload.agentId;
+        const existing = activeAgentFor(deviceId, id);
         if (existing) {
           entry.record.status = "disconnected";
           entry.record.lastSeen = now();
@@ -107,7 +108,8 @@ function attemptOutboundConnection(id: string, address: string, backoffMs = 1000
           return;
         }
         entry.record.status = "connected";
-        entry.record.remoteAgentId = payload.agentId;
+        entry.record.deviceId = deviceId;
+        entry.record.remoteAgentId = deviceId;
         entry.record.fingerprint = payload.fingerprint;
         handleAgentStatusChange(entry.record);
       }
@@ -115,7 +117,8 @@ function attemptOutboundConnection(id: string, address: string, backoffMs = 1000
         broadcastToUi(id, payload);
         const summary = summarizeOutput(payload.data);
         if (summary) {
-          console.log(`[agent ${entry.record.remoteAgentId ?? entry.record.id}] ${payload.data}`);
+          const label = entry.record.deviceId ?? entry.record.remoteAgentId ?? entry.record.id;
+          console.log(`[agent ${label}] ${payload.data}`);
         }
       }
       if (payload.type === "heartbeat") {
@@ -238,11 +241,12 @@ function broadcastAgentEvent(record: AgentRecord) {
   }
 }
 
-function activeAgentFor(remoteAgentId: string | undefined, currentId: string) {
-  if (!remoteAgentId) return undefined;
+function activeAgentFor(deviceId: string | undefined, currentId: string) {
+  if (!deviceId) return undefined;
   for (const [id, entry] of agents.entries()) {
     if (id === currentId) continue;
-    if (entry.record.remoteAgentId === remoteAgentId && entry.record.status !== "disconnected") {
+    const entryDeviceId = entry.record.deviceId ?? entry.record.remoteAgentId;
+    if (entryDeviceId === deviceId && entry.record.status !== "disconnected") {
       return { id, entry };
     }
   }
@@ -254,6 +258,7 @@ function handleAgentStatusChange(record: AgentRecord) {
     type: "status",
     status: record.status,
     fingerprint: record.fingerprint,
+    deviceId: record.deviceId ?? record.remoteAgentId,
     remoteAgentId: record.remoteAgentId,
     agentId: record.id,
     connectionId: record.connectionId,
@@ -308,6 +313,7 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
         type: "status",
         status: entry.record.status,
         fingerprint: entry.record.fingerprint,
+        deviceId: entry.record.deviceId ?? entry.record.remoteAgentId,
         remoteAgentId: entry.record.remoteAgentId,
         agentId: entry.record.id,
         connectionId: sessionId,
@@ -386,7 +392,8 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
         entry.record.lastSeen = now();
 
         if (payload.type === "hello") {
-          const existing = activeAgentFor(payload.agentId, id);
+          const deviceId = payload.agentId;
+          const existing = activeAgentFor(deviceId, id);
           if (existing) {
             entry.record.status = "disconnected";
             entry.record.lastSeen = now();
@@ -398,7 +405,8 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
             return;
           }
           entry.record.status = "connected";
-          entry.record.remoteAgentId = payload.agentId;
+          entry.record.deviceId = deviceId;
+          entry.record.remoteAgentId = deviceId;
           entry.record.fingerprint = payload.fingerprint;
           agents.set(id, entry);
           socket.send(JSON.stringify({ type: "hello", token } satisfies ControlMessage));
@@ -410,7 +418,8 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
           broadcastToUi(id, payload);
           const summary = summarizeOutput(payload.data);
           if (summary) {
-            console.log(`[agent ${entry.record.remoteAgentId ?? entry.record.id}] ${payload.data}`);
+            const label = entry.record.deviceId ?? entry.record.remoteAgentId ?? entry.record.id;
+            console.log(`[agent ${label}] ${payload.data}`);
           }
         }
         if (payload.type === "heartbeat") {

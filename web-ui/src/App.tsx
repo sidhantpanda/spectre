@@ -15,6 +15,10 @@ export function formatTimestamp(ts: number) {
   return date.toLocaleTimeString();
 }
 
+function displayDeviceId(agent: Agent) {
+  return agent.deviceId ?? agent.remoteAgentId ?? agent.id;
+}
+
 function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [address, setAddress] = useState("");
@@ -150,7 +154,7 @@ function App() {
                       <Badge variant="secondary" className="capitalize">
                         {agent.direction}
                       </Badge>
-                      <p className="font-medium">{agent.remoteAgentId ?? agent.id}</p>
+                      <p className="font-medium">{displayDeviceId(agent)}</p>
                     </div>
                     <p className="text-sm text-muted-foreground">{agent.address}</p>
                   </div>
