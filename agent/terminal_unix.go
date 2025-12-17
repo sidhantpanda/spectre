@@ -18,8 +18,20 @@ func startShell() *os.File {
 		shell = "/bin/bash"
 	}
 
+	env := os.Environ()
+	hasTERM := false
+	for _, e := range env {
+		if len(e) >= 5 && e[:5] == "TERM=" {
+			hasTERM = true
+			break
+		}
+	}
+	if !hasTERM {
+		env = append(env, "TERM=xterm-256color")
+	}
+
 	cmd := exec.Command(shell)
-	cmd.Env = os.Environ()
+	cmd.Env = env
 	cmd.SysProcAttr = c
 
 	ptm, err := pty.Start(cmd)
