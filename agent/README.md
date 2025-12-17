@@ -89,13 +89,57 @@ Examples (replace `<tag>` with a release like `agent-v1.2.3` and choose the righ
 # Linux/macOS
 curl -L -o spectre-agent.tar.gz "https://github.com/sidhantpanda/spectre/releases/download/<tag>/spectre-agent-linux-amd64.tar.gz"
 tar -xzf spectre-agent.tar.gz
-./spectre-agent-linux-amd64 -listen :8081 -token changeme -host ws://control-server-hostname:8080/agents/register
+sudo mv spectre-agent-linux-amd64 /usr/local/bin/spectre-agent
+echo 'export PATH="/usr/local/bin:$PATH"' >> ~/.profile
+echo 'export PATH="/usr/local/bin:$PATH"' >> ~/.zshrc
+source ~/.profile 2>/dev/null || true
+source ~/.zshrc 2>/dev/null || true
+spectre-agent -listen :8081 -token changeme -host ws://control-server-hostname:8080/agents/register
 
 # Windows (PowerShell)
 Invoke-WebRequest -Uri "https://github.com/sidhantpanda/spectre/releases/download/<tag>/spectre-agent-windows-amd64.zip" -OutFile spectre-agent.zip
 Expand-Archive spectre-agent.zip -DestinationPath .
 ./spectre-agent-windows-amd64.exe -listen :8081 -token changeme -host ws://control-server-hostname:8080/agents/register
 ```
+
+One-liner installer for Linux/macOS (auto-detects OS/arch, grabs latest release, installs to `/usr/local/bin`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh | sudo bash
+```
+
+Without sudo (installs to `~/.local/bin`):
+
+```bash
+BIN_DIR="$HOME/.local/bin" curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh | bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.profile 2>/dev/null || true
+source ~/.zshrc 2>/dev/null || true
+```
+
+Uninstall (removes service and binary; set `BIN_DIR` if you installed elsewhere):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/uninstall-agent.sh | sudo bash
+```
+
+## Installing as a service (Linux/macOS)
+The agent can install itself as a boot-starting service using systemd (Linux) or launchd (macOS). After placing `spectre-agent` somewhere on your `PATH` (e.g., `/usr/local/bin`), run:
+
+```bash
+sudo spectre-agent up -token <token> -host ws://control-server-hostname:8080/agents/register
+```
+
+This writes the service definition, enables it at boot, and starts it immediately. To stop and remove the service:
+
+```bash
+sudo spectre-agent down
+```
+
+Defaults baked into the service if not overridden: `-listen :8081`, `-token changeme`, optional `-host` for outbound registrations. Use the `up` flags to set the values you want persisted.
+
+Windows users can run the `.exe` directly or create a Windows service manually (not automated by `up/down`).
 
 ## Notes
 - PTY mode enables proper handling of `sudo` password prompts and interactive programs.

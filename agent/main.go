@@ -11,6 +11,21 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "up":
+			if err := serviceUp(os.Args[2:]); err != nil {
+				log.Fatalf("failed to install/start service: %v", err)
+			}
+			return
+		case "down":
+			if err := serviceDown(); err != nil {
+				log.Fatalf("failed to stop/remove service: %v", err)
+			}
+			return
+		}
+	}
+
 	listen := flag.String("listen", ":8081", "Address for the agent API and WebSocket server")
 	token := flag.String("token", "changeme", "Auth token expected from the control server")
 	host := flag.String("host", "", "Optional control server host (ws://host:port/agents/register) to initiate a connection")
