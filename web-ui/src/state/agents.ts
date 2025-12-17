@@ -67,3 +67,11 @@ export function subscribeToAgentEvents(
 
   return socket;
 }
+
+export async function refreshDockerInfo(apiBase: string = API_BASE): Promise<void> {
+  try {
+    await fetch(`${apiBase}/agents/refresh-docker`, { method: "POST" });
+  } catch {
+    // ignore fire-and-forget errors; UI will still get updates if available
+  }
+}

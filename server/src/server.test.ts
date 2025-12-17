@@ -82,4 +82,15 @@ describe("createApp routes", () => {
     expect(pushToAgent).toHaveBeenCalledWith("abc", { type: "keystroke", data: "ls" });
     expect(okRes.body).toEqual({ status: "sent" });
   });
+
+  it("refreshes docker info when requested", async () => {
+    const refreshDockerInfo = vi.fn();
+    const app = createApp({ listAgents, connectToAgent, pushToAgent, refreshDockerInfo }, "token");
+
+    const res = await request(app).post("/agents/refresh-docker");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: "requested" });
+    expect(refreshDockerInfo).toHaveBeenCalledTimes(1);
+  });
 });

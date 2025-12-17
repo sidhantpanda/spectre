@@ -31,6 +31,7 @@ type AgentDependencies = {
   listAgents: () => AgentRecord[];
   connectToAgent: (address: string, token: string) => AgentRecord;
   pushToAgent: (id: string, message: ControlMessage) => void;
+  refreshDockerInfo?: () => void;
 };
 
 function now() {
@@ -165,10 +166,19 @@ function pushToAgent(agentId: string, message: ControlMessage) {
 }
 
 function requestDockerInfo(agentId: string) {
+  console.log(`[docker] requesting info from agent ${agentId}`);
   try {
     pushToAgent(agentId, { type: "dockerInfo" });
   } catch (err) {
     console.warn(`[docker] unable to request info from agent ${agentId}: ${(err as Error).message}`);
+  }
+}
+
+function refreshAllDockerInfo() {
+  for (const [id, entry] of agents.entries()) {
+    if (entry.record.status === "connected") {
+      requestDockerInfo(id);
+    }
   }
 }
 
@@ -177,6 +187,7 @@ export function createApp(
     listAgents,
     connectToAgent,
     pushToAgent,
+    refreshDockerInfo: refreshAllDockerInfo,
   },
   defaultToken: string = AUTH_TOKEN,
 ) {
@@ -218,6 +229,13 @@ export function createApp(
     } catch (err) {
       res.status(404).json({ error: (err as Error).message });
     }
+  });
+
+  app.post("/agents/refresh-docker", (_req: Request, res: Response) => {
+    if (deps.refreshDockerInfo) {
+      deps.refreshDockerInfo();
+    }
+    res.json({ status: "requested" });
   });
 
   return app;

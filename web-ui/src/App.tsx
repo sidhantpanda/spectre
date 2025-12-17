@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./com
 import { AgentStatusDot } from "./components/AgentStatusDot";
 import { ThemeToggle } from "./components/ThemeToggle";
 import type { Agent } from "./state/agents";
-import { fetchAgents, subscribeToAgentEvents } from "./state/agents";
+import { fetchAgents, refreshDockerInfo, subscribeToAgentEvents } from "./state/agents";
 import { getApiBase } from "./lib/api";
 
 const API_BASE = getApiBase();
@@ -64,6 +64,7 @@ function App() {
   }
 
   useEffect(() => {
+    refreshDockerInfo(API_BASE);
     loadAgents();
     const socket = subscribeToAgentEvents(
       (list) => setAgents(list),
