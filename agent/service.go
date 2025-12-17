@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -64,23 +65,32 @@ func buildExecArgs(listen, token, host string) []string {
 }
 
 func installSystemdService(exe string, args []string) error {
-	content := fmt.Sprintf(`[Unit]
-Description=Spectre agent
-After=network.target
+	userName, groupName := resolveServiceAccount()
+	var sb strings.Builder
+	sb.WriteString("[Unit]\n")
+	sb.WriteString("Description=Spectre agent\n")
+	sb.WriteString("After=network.target\n\n")
 
-[Service]
-Type=simple
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/bin
-Environment=SPECTRE_AGENT_HOME=/var/lib/spectre-agent
-StateDirectory=spectre-agent
-ExecStart=%s %s
-WorkingDirectory=%s
-Restart=always
-RestartSec=5
+	sb.WriteString("[Service]\n")
+	sb.WriteString("Type=simple\n")
+	sb.WriteString("Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/bin\n")
+	sb.WriteString("Environment=SPECTRE_AGENT_HOME=/var/lib/spectre-agent\n")
+	sb.WriteString("StateDirectory=spectre-agent\n")
+	if userName != "" {
+		sb.WriteString("User=" + userName + "\n")
+	}
+	if groupName != "" {
+		sb.WriteString("Group=" + groupName + "\n")
+	}
+	sb.WriteString(fmt.Sprintf("ExecStart=%s %s\n", exe, strings.Join(args, " ")))
+	sb.WriteString(fmt.Sprintf("WorkingDirectory=%s\n", filepath.Dir(exe)))
+	sb.WriteString("Restart=always\n")
+	sb.WriteString("RestartSec=5\n\n")
 
-[Install]
-WantedBy=multi-user.target
-`, exe, strings.Join(args, " "), filepath.Dir(exe))
+	sb.WriteString("[Install]\n")
+	sb.WriteString("WantedBy=multi-user.target\n")
+
+	content := sb.String()
 
 	if err := os.WriteFile(systemdUnitPath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("write unit: %w", err)
@@ -108,6 +118,12 @@ func uninstallSystemdService() error {
 }
 
 func installLaunchdService(exe string, args []string) error {
+	userName, _ := resolveServiceAccount()
+	var userLine string
+	if userName != "" {
+		userLine = fmt.Sprintf("  <key>UserName</key><string>%s</string>\n", userName)
+	}
+
 	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -122,9 +138,10 @@ func installLaunchdService(exe string, args []string) error {
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>/var/log/spectre-agent.log</string>
   <key>StandardErrorPath</key><string>/var/log/spectre-agent.log</string>
+%s
 </dict>
 </plist>
-`, launchdLabel, exe, launchdArgs(args))
+`, launchdLabel, exe, launchdArgs(args), userLine)
 
 	if err := os.WriteFile(launchdPlistPath, []byte(plist), 0644); err != nil {
 		return fmt.Errorf("write plist: %w", err)
@@ -158,6 +175,32 @@ func launchdArgs(args []string) string {
 		b.WriteString("</string>\n")
 	}
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func resolveServiceAccount() (string, string) {
+	// Prefer the user who invoked via sudo; fallback to current user.
+	name := os.Getenv("SUDO_USER")
+	if name == "" {
+		name = os.Getenv("USER")
+	}
+	if name == "" || name == "root" {
+		return "", ""
+	}
+
+	u, err := user.Lookup(name)
+	if err != nil {
+		return name, ""
+	}
+
+	group := ""
+	if g, err := user.LookupGroupId(u.Gid); err == nil {
+		group = g.Name
+	}
+	if group == "" {
+		group = u.Username
+	}
+
+	return u.Username, group
 }
 
 func runCommand(name string, args ...string) error {
