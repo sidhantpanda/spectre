@@ -11,6 +11,7 @@ require() {
 
 require curl
 require tar
+require file
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 arch=$(uname -m)
@@ -52,9 +53,17 @@ curl -fL --retry 3 --retry-delay 2 "$asset_url" -o "$tmpdir/$asset_name"
 
 tar -xzf "$tmpdir/$asset_name" -C "$tmpdir"
 
-binary_path=$(find "$tmpdir" -type f \( -name "spectre-agent" -o -name "spectre-agent-*" \) ! -name "*.tar.gz" ! -name "*.zip" | head -n1)
+binary_path=""
+while IFS= read -r f; do
+  magic=$(file -b "$f")
+  if printf '%s' "$magic" | grep -Eq '(ELF|Mach-O)'; then
+    binary_path="$f"
+    break
+  fi
+done < <(find "$tmpdir" -type f \( -name "spectre-agent" -o -name "spectre-agent-*" \) ! -name "*.tar.gz" ! -name "*.zip" | sort)
+
 if [[ -z "$binary_path" ]]; then
-  echo "error: binary not found after extraction" >&2
+  echo "error: executable binary not found after extraction" >&2
   exit 1
 fi
 chmod +x "$binary_path"
