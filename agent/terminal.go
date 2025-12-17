@@ -142,6 +142,19 @@ func readFromControl(conn *websocket.Conn, sessions *ptyManager, errCh chan<- er
 		case "reset":
 			session := sessions.reset(sessionID)
 			restartPTY(session)
+		case "dockerInfo":
+			containers, err := listDockerContainers()
+			payload := AgentMessage{
+				Type:       "dockerInfo",
+				Containers: containers,
+			}
+			if err != nil {
+				payload.Error = err.Error()
+			}
+			if err := conn.WriteJSON(payload); err != nil {
+				errCh <- err
+				return
+			}
 		}
 	}
 }

@@ -1,17 +1,12 @@
 import request from "supertest";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { createApp } from "./server";
-import { AgentRecord } from "./types";
+import { AgentRecord, ControlMessage } from "./types";
 
 describe("createApp routes", () => {
   let listAgents = vi.fn<[], AgentRecord[]>();
   let connectToAgent = vi.fn<(address: string, token: string) => AgentRecord>();
-  let pushToAgent = vi.fn<
-    (
-      id: string,
-      message: { type: "keystroke"; data: string; sessionId?: string } | { type: "reset"; sessionId?: string },
-    ) => void
-  >();
+  let pushToAgent = vi.fn<(id: string, message: ControlMessage) => void>();
 
   beforeEach(() => {
     listAgents = vi.fn(() => []);

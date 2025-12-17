@@ -112,6 +112,7 @@ function attemptOutboundConnection(id: string, address: string, backoffMs = 1000
         entry.record.remoteAgentId = deviceId;
         entry.record.fingerprint = payload.fingerprint;
         handleAgentStatusChange(entry.record);
+        requestDockerInfo(id);
       }
       if (payload.type === "output") {
         broadcastToUi(id, payload);
@@ -123,6 +124,11 @@ function attemptOutboundConnection(id: string, address: string, backoffMs = 1000
       }
       if (payload.type === "heartbeat") {
         entry.record.status = "connected";
+      }
+      if (payload.type === "dockerInfo") {
+        entry.record.docker = payload.containers ?? [];
+        entry.record.dockerError = payload.error;
+        handleAgentStatusChange(entry.record);
       }
       agents.set(id, entry);
     } catch (err) {
@@ -156,6 +162,14 @@ function pushToAgent(agentId: string, message: ControlMessage) {
     throw new Error("agent not connected");
   }
   entry.socket.send(JSON.stringify(message));
+}
+
+function requestDockerInfo(agentId: string) {
+  try {
+    pushToAgent(agentId, { type: "dockerInfo" });
+  } catch (err) {
+    console.warn(`[docker] unable to request info from agent ${agentId}: ${(err as Error).message}`);
+  }
 }
 
 export function createApp(
@@ -411,6 +425,7 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
           agents.set(id, entry);
           socket.send(JSON.stringify({ type: "hello", token } satisfies ControlMessage));
           handleAgentStatusChange(entry.record);
+          requestDockerInfo(id);
           return;
         }
 
@@ -424,6 +439,11 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
         }
         if (payload.type === "heartbeat") {
           entry.record.status = "connected";
+        }
+        if (payload.type === "dockerInfo") {
+          entry.record.docker = payload.containers ?? [];
+          entry.record.dockerError = payload.error;
+          handleAgentStatusChange(entry.record);
         }
         agents.set(id, entry);
       } catch (err) {

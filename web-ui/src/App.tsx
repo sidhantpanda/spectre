@@ -193,6 +193,22 @@ function App() {
                     </div>
                     <p className="text-sm text-muted-foreground">{displayDeviceId(agent)}</p>
                     <p className="text-sm text-muted-foreground">{agent.address}</p>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      {agent.docker && agent.docker.length > 0 ? (
+                        agent.docker.map((container) => (
+                          <Badge key={container.name} variant="outline" className="text-xs font-normal">
+                            <span className="font-medium text-foreground">{container.name}</span>
+                            <span className="ml-1 text-muted-foreground">
+                              {container.ports.length > 0 ? container.ports.join(", ") : "no ports"}
+                            </span>
+                          </Badge>
+                        ))
+                      ) : agent.dockerError ? (
+                        <span className="text-xs text-destructive">Docker: {agent.dockerError}</span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Docker: no containers reported</span>
+                      )}
+                    </div>
                   </div>
                   <div className="text-xs text-muted-foreground text-right">
                     <p>Last seen: {formatTimestamp(agent.lastSeen)}</p>

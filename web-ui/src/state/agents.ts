@@ -12,6 +12,11 @@ export type AgentFingerprint = {
   nics: string[];
 };
 
+export type DockerContainer = {
+  name: string;
+  ports: string[];
+};
+
 export type Agent = {
   id: string;
   connectionId: string;
@@ -22,6 +27,8 @@ export type Agent = {
   fingerprint?: AgentFingerprint;
   remoteAgentId?: string;
   direction: AgentDirection;
+  docker?: DockerContainer[];
+  dockerError?: string;
 };
 
 export async function fetchAgents(apiBase: string = API_BASE): Promise<Agent[]> {
