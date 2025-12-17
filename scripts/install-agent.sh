@@ -4,7 +4,6 @@ set -euo pipefail
 REPO="sidhantpanda/spectre"
 TAG="${TAG:-}"
 BIN_DIR="${BIN_DIR:-/usr/local/bin}"
-PY_BIN=""
 
 require() {
   command -v "$1" >/dev/null 2>&1 || { echo "error: '$1' is required" >&2; exit 1; }
@@ -12,15 +11,6 @@ require() {
 
 require curl
 require tar
-
-if command -v python3 >/dev/null 2>&1; then
-  PY_BIN="python3"
-elif command -v python >/dev/null 2>&1; then
-  PY_BIN="python"
-else
-  echo "error: python is required" >&2
-  exit 1
-fi
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 arch=$(uname -m)
@@ -42,38 +32,23 @@ tmpdir=$(mktemp -d)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
 
-fetch_release() {
-  local url="https://api.github.com/repos/${REPO}/releases/${1}"
-  curl -fsSL "$url"
-}
-
-json_file="$tmpdir/release.json"
 if [[ -z "$TAG" ]]; then
-  fetch_release latest > "$json_file"
+  latest_json=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=20")
+  tag=$(printf '%s' "$latest_json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"agent-v[^"}]*"' | head -n1 | sed 's/.*"agent-v\([^"]*\)"/agent-v\1/')
+  if [[ -z "$tag" ]]; then
+    echo "error: could not find latest agent-v* release tag" >&2
+    exit 1
+  fi
+  display_tag="$tag"
 else
-  fetch_release "tags/${TAG}" > "$json_file"
+  tag="$TAG"
+  display_tag="$TAG"
 fi
 
-read -r tag asset_url < <("$PY_BIN" <<'PY' "$json_file" "$asset_name"
-import json, sys
-json_path, asset_name = sys.argv[1:3]
-with open(json_path, "r", encoding="utf-8") as fh:
-    data = json.load(fh)
-tag = data.get("tag_name", "")
-url = None
-for asset in data.get("assets", []):
-    if asset.get("name") == asset_name:
-        url = asset.get("browser_download_url")
-        break
-if not tag or not url:
-    sys.exit(1)
-print(tag)
-print(url)
-PY
-) || { echo "error: failed to find asset ${asset_name} (tag=${TAG:-latest})" >&2; exit 1; }
+asset_url="https://github.com/${REPO}/releases/download/${tag}/${asset_name}"
 
-echo "Downloading ${asset_name} from release ${tag}..."
-curl -fsSL "$asset_url" -o "$tmpdir/$asset_name"
+echo "Downloading ${asset_name} from release ${display_tag}..."
+curl -fL --retry 3 --retry-delay 2 "$asset_url" -o "$tmpdir/$asset_name"
 
 tar -xzf "$tmpdir/$asset_name" -C "$tmpdir"
 
