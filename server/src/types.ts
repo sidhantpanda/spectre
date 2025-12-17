@@ -24,6 +24,11 @@ export interface SystemInfo {
   diskFreeBytes: number;
 }
 
+export interface NetworkInfo {
+  ipv4: string[];
+  ipv6: string[];
+}
+
 export interface AgentRecord {
   id: string;
   address: string;
@@ -38,6 +43,8 @@ export interface AgentRecord {
   dockerError?: string;
   systemInfo?: SystemInfo;
   systemInfoError?: string;
+  networkInfo?: NetworkInfo;
+  networkInfoError?: string;
 }
 
 export type ControlMessage =
@@ -45,11 +52,13 @@ export type ControlMessage =
   | { type: "keystroke"; data: string; sessionId?: string }
   | { type: "reset"; sessionId?: string }
   | { type: "dockerInfo" }
-  | { type: "systemInfo" };
+  | { type: "systemInfo" }
+  | { type: "networkInfo" };
 
 export type AgentMessage =
   | { type: "hello"; agentId: string; fingerprint: AgentFingerprint }
   | { type: "output"; data: string; sessionId?: string }
   | { type: "heartbeat" }
   | { type: "dockerInfo"; containers?: DockerContainer[]; error?: string }
-  | { type: "systemInfo"; systemInfo?: SystemInfo; error?: string };
+  | { type: "systemInfo"; systemInfo?: SystemInfo; error?: string }
+  | { type: "networkInfo"; networkInfo?: NetworkInfo; error?: string };

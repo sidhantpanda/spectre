@@ -28,6 +28,11 @@ export type SystemInfo = {
   diskFreeBytes: number;
 };
 
+export type NetworkInfo = {
+  ipv4: string[];
+  ipv6: string[];
+};
+
 export type Agent = {
   id: string;
   connectionId: string;
@@ -42,6 +47,8 @@ export type Agent = {
   dockerError?: string;
   systemInfo?: SystemInfo;
   systemInfoError?: string;
+  networkInfo?: NetworkInfo;
+  networkInfoError?: string;
 };
 
 export async function fetchAgents(apiBase: string = API_BASE): Promise<Agent[]> {
@@ -92,6 +99,14 @@ export async function refreshDockerInfo(apiBase: string = API_BASE): Promise<voi
 export async function refreshSystemInfo(apiBase: string = API_BASE): Promise<void> {
   try {
     await fetch(`${apiBase}/agents/refresh-system`, { method: "POST" });
+  } catch {
+    // ignore fire-and-forget errors; UI will still get updates if available
+  }
+}
+
+export async function refreshNetworkInfo(apiBase: string = API_BASE): Promise<void> {
+  try {
+    await fetch(`${apiBase}/agents/refresh-network`, { method: "POST" });
   } catch {
     // ignore fire-and-forget errors; UI will still get updates if available
   }

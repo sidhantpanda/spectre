@@ -20,6 +20,11 @@ type SystemInfo struct {
 	DiskFreeBytes  uint64 `json:"diskFreeBytes"`
 }
 
+type NetworkInfo struct {
+	IPv4 []string `json:"ipv4"`
+	IPv6 []string `json:"ipv6"`
+}
+
 // ControlMessage documents what the agent can receive from the control server.
 type ControlMessage struct {
 	Type  string `json:"type"`
@@ -38,5 +43,6 @@ type AgentMessage struct {
 	SessionID   string            `json:"sessionId,omitempty"`
 	Containers  []DockerContainer `json:"containers,omitempty"`
 	SystemInfo  *SystemInfo       `json:"systemInfo,omitempty"`
+	NetworkInfo *NetworkInfo      `json:"networkInfo,omitempty"`
 	Error       string            `json:"error,omitempty"`
 }

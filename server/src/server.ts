@@ -33,6 +33,7 @@ type AgentDependencies = {
   pushToAgent: (id: string, message: ControlMessage) => void;
   refreshDockerInfo?: () => void;
   refreshSystemInfo?: () => void;
+  refreshNetworkInfo?: () => void;
 };
 
 function now() {
@@ -116,6 +117,7 @@ function attemptOutboundConnection(id: string, address: string, backoffMs = 1000
         handleAgentStatusChange(entry.record);
         requestDockerInfo(id);
         requestSystemInfo(id);
+        requestNetworkInfo(id);
       }
       if (payload.type === "output") {
         broadcastToUi(id, payload);
@@ -136,6 +138,11 @@ function attemptOutboundConnection(id: string, address: string, backoffMs = 1000
       if (payload.type === "systemInfo") {
         entry.record.systemInfo = payload.systemInfo;
         entry.record.systemInfoError = payload.error;
+        handleAgentStatusChange(entry.record);
+      }
+      if (payload.type === "networkInfo") {
+        entry.record.networkInfo = payload.networkInfo;
+        entry.record.networkInfoError = payload.error;
         handleAgentStatusChange(entry.record);
       }
       agents.set(id, entry);
@@ -206,6 +213,23 @@ function refreshAllSystemInfo() {
   }
 }
 
+function requestNetworkInfo(agentId: string) {
+  console.log(`[network] requesting info from agent ${agentId}`);
+  try {
+    pushToAgent(agentId, { type: "networkInfo" });
+  } catch (err) {
+    console.warn(`[network] unable to request info from agent ${agentId}: ${(err as Error).message}`);
+  }
+}
+
+function refreshAllNetworkInfo() {
+  for (const [id, entry] of agents.entries()) {
+    if (entry.record.status === "connected") {
+      requestNetworkInfo(id);
+    }
+  }
+}
+
 export function createApp(
   deps: AgentDependencies = {
     listAgents,
@@ -213,6 +237,7 @@ export function createApp(
     pushToAgent,
     refreshDockerInfo: refreshAllDockerInfo,
     refreshSystemInfo: refreshAllSystemInfo,
+    refreshNetworkInfo: refreshAllNetworkInfo,
   },
   defaultToken: string = AUTH_TOKEN,
 ) {
@@ -266,6 +291,13 @@ export function createApp(
   app.post("/agents/refresh-system", (_req: Request, res: Response) => {
     if (deps.refreshSystemInfo) {
       deps.refreshSystemInfo();
+    }
+    res.json({ status: "requested" });
+  });
+
+  app.post("/agents/refresh-network", (_req: Request, res: Response) => {
+    if (deps.refreshNetworkInfo) {
+      deps.refreshNetworkInfo();
     }
     res.json({ status: "requested" });
   });
@@ -477,6 +509,7 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
           handleAgentStatusChange(entry.record);
           requestDockerInfo(id);
           requestSystemInfo(id);
+          requestNetworkInfo(id);
           return;
         }
 
@@ -499,6 +532,11 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
         if (payload.type === "systemInfo") {
           entry.record.systemInfo = payload.systemInfo;
           entry.record.systemInfoError = payload.error;
+          handleAgentStatusChange(entry.record);
+        }
+        if (payload.type === "networkInfo") {
+          entry.record.networkInfo = payload.networkInfo;
+          entry.record.networkInfoError = payload.error;
           handleAgentStatusChange(entry.record);
         }
         agents.set(id, entry);

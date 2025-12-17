@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { Cpu, Gauge, HardDrive, MemoryStick, Monitor } from "lucide-react";
+import { Cpu, Gauge, HardDrive, MemoryStick, Monitor, Network } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -7,7 +7,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./com
 import { AgentStatusDot } from "./components/AgentStatusDot";
 import { ThemeToggle } from "./components/ThemeToggle";
 import type { Agent } from "./state/agents";
-import { fetchAgents, refreshDockerInfo, refreshSystemInfo, subscribeToAgentEvents } from "./state/agents";
+import {
+  fetchAgents,
+  refreshDockerInfo,
+  refreshNetworkInfo,
+  refreshSystemInfo,
+  subscribeToAgentEvents,
+} from "./state/agents";
 import { getApiBase } from "./lib/api";
 
 const API_BASE = getApiBase();
@@ -30,6 +36,11 @@ function formatDisk(free?: number, total?: number) {
   if (free && total) return `${formatBytes(free)} free / ${formatBytes(total)} total`;
   if (total) return `${formatBytes(total)} total`;
   return formatBytes(free);
+}
+
+function formatList(values?: string[]) {
+  if (!values || values.length === 0) return "none";
+  return values.join(", ");
 }
 
 function deviceKey(agent: Agent) {
@@ -82,6 +93,7 @@ function App() {
   useEffect(() => {
     refreshDockerInfo(API_BASE);
     refreshSystemInfo(API_BASE);
+    refreshNetworkInfo(API_BASE);
     loadAgents();
     const socket = subscribeToAgentEvents(
       (list) => setAgents(list),
@@ -237,6 +249,22 @@ function App() {
                         <span className="text-xs text-destructive">System: {agent.systemInfoError}</span>
                       ) : (
                         <span className="text-xs text-muted-foreground">System info pending...</span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                      {agent.networkInfo ? (
+                        <>
+                          <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
+                            <Network size={14} /> IPv4: {formatList(agent.networkInfo.ipv4)}
+                          </span>
+                          {/* <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
+                            <Network size={14} /> IPv6: {formatList(agent.networkInfo.ipv6)}
+                          </span> */}
+                        </>
+                      ) : agent.networkInfoError ? (
+                        <span className="text-xs text-destructive">Network: {agent.networkInfoError}</span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Network info pending...</span>
                       )}
                     </div>
                     <div className="flex flex-wrap items-center gap-2 pt-1">

@@ -168,6 +168,16 @@ func readFromControl(conn *websocket.Conn, sessions *ptyManager, errCh chan<- er
 				errCh <- err
 				return
 			}
+		case "networkInfo":
+			info := collectNetworkInfo()
+			payload := AgentMessage{
+				Type:        "networkInfo",
+				NetworkInfo: &info,
+			}
+			if err := conn.WriteJSON(payload); err != nil {
+				errCh <- err
+				return
+			}
 		}
 	}
 }

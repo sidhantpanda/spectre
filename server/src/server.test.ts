@@ -104,4 +104,15 @@ describe("createApp routes", () => {
     expect(res.body).toEqual({ status: "requested" });
     expect(refreshSystemInfo).toHaveBeenCalledTimes(1);
   });
+
+  it("refreshes network info when requested", async () => {
+    const refreshNetworkInfo = vi.fn();
+    const app = createApp({ listAgents, connectToAgent, pushToAgent, refreshNetworkInfo }, "token");
+
+    const res = await request(app).post("/agents/refresh-network");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: "requested" });
+    expect(refreshNetworkInfo).toHaveBeenCalledTimes(1);
+  });
 });
