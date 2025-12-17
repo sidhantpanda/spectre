@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { Cpu, Gauge, HardDrive, MemoryStick, Monitor } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -6,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./com
 import { AgentStatusDot } from "./components/AgentStatusDot";
 import { ThemeToggle } from "./components/ThemeToggle";
 import type { Agent } from "./state/agents";
-import { fetchAgents, refreshDockerInfo, subscribeToAgentEvents } from "./state/agents";
+import { fetchAgents, refreshDockerInfo, refreshSystemInfo, subscribeToAgentEvents } from "./state/agents";
 import { getApiBase } from "./lib/api";
 
 const API_BASE = getApiBase();
@@ -14,6 +15,21 @@ const API_BASE = getApiBase();
 export function formatTimestamp(ts: number) {
   const date = new Date(ts);
   return date.toLocaleTimeString();
+}
+
+function formatBytes(bytes?: number) {
+  if (!bytes || bytes <= 0) return "n/a";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / Math.pow(1024, exponent);
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[exponent]}`;
+}
+
+function formatDisk(free?: number, total?: number) {
+  if (!free && !total) return "n/a";
+  if (free && total) return `${formatBytes(free)} free / ${formatBytes(total)} total`;
+  if (total) return `${formatBytes(total)} total`;
+  return formatBytes(free);
 }
 
 function deviceKey(agent: Agent) {
@@ -65,6 +81,7 @@ function App() {
 
   useEffect(() => {
     refreshDockerInfo(API_BASE);
+    refreshSystemInfo(API_BASE);
     loadAgents();
     const socket = subscribeToAgentEvents(
       (list) => setAgents(list),
@@ -194,6 +211,34 @@ function App() {
                     </div>
                     <p className="text-sm text-muted-foreground">{displayDeviceId(agent)}</p>
                     <p className="text-sm text-muted-foreground">{agent.address}</p>
+                    <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                      {agent.systemInfo ? (
+                        <>
+                          <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
+                            <Monitor size={14} /> {agent.systemInfo.os}
+                            {agent.systemInfo.version && (
+                              <span className="text-muted-foreground"> {agent.systemInfo.version}</span>
+                            )}
+                          </span>
+                          <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
+                            <Cpu size={14} /> {agent.systemInfo.cpu || "CPU"}
+                          </span>
+                          <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
+                            <Gauge size={14} /> {agent.systemInfo.cores} cores ({agent.systemInfo.arch})
+                          </span>
+                          <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
+                            <MemoryStick size={14} /> {formatBytes(agent.systemInfo.memoryBytes)}
+                          </span>
+                          <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
+                            <HardDrive size={14} /> {formatDisk(agent.systemInfo.diskFreeBytes, agent.systemInfo.diskTotalBytes)}
+                          </span>
+                        </>
+                      ) : agent.systemInfoError ? (
+                        <span className="text-xs text-destructive">System: {agent.systemInfoError}</span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">System info pending...</span>
+                      )}
+                    </div>
                     <div className="flex flex-wrap items-center gap-2 pt-1">
                       {agent.docker && agent.docker.length > 0 ? (
                         agent.docker.map((container) => (

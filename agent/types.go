@@ -9,6 +9,17 @@ type DockerContainer struct {
 	Ports []string `json:"ports"`
 }
 
+type SystemInfo struct {
+	OS             string `json:"os"`
+	Version        string `json:"version"`
+	CPU            string `json:"cpu"`
+	Arch           string `json:"arch"`
+	Cores          int    `json:"cores"`
+	MemoryBytes    uint64 `json:"memoryBytes"`
+	DiskTotalBytes uint64 `json:"diskTotalBytes"`
+	DiskFreeBytes  uint64 `json:"diskFreeBytes"`
+}
+
 // ControlMessage documents what the agent can receive from the control server.
 type ControlMessage struct {
 	Type  string `json:"type"`
@@ -26,5 +37,6 @@ type AgentMessage struct {
 	Data        string            `json:"data,omitempty"`
 	SessionID   string            `json:"sessionId,omitempty"`
 	Containers  []DockerContainer `json:"containers,omitempty"`
+	SystemInfo  *SystemInfo       `json:"systemInfo,omitempty"`
 	Error       string            `json:"error,omitempty"`
 }

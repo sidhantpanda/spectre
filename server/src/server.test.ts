@@ -93,4 +93,15 @@ describe("createApp routes", () => {
     expect(res.body).toEqual({ status: "requested" });
     expect(refreshDockerInfo).toHaveBeenCalledTimes(1);
   });
+
+  it("refreshes system info when requested", async () => {
+    const refreshSystemInfo = vi.fn();
+    const app = createApp({ listAgents, connectToAgent, pushToAgent, refreshSystemInfo }, "token");
+
+    const res = await request(app).post("/agents/refresh-system");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: "requested" });
+    expect(refreshSystemInfo).toHaveBeenCalledTimes(1);
+  });
 });

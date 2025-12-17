@@ -155,6 +155,19 @@ func readFromControl(conn *websocket.Conn, sessions *ptyManager, errCh chan<- er
 				errCh <- err
 				return
 			}
+		case "systemInfo":
+			info, err := collectSystemInfo()
+			payload := AgentMessage{
+				Type:       "systemInfo",
+				SystemInfo: &info,
+			}
+			if err != nil {
+				payload.Error = err.Error()
+			}
+			if err := conn.WriteJSON(payload); err != nil {
+				errCh <- err
+				return
+			}
 		}
 	}
 }

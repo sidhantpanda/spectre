@@ -17,6 +17,17 @@ export type DockerContainer = {
   ports: string[];
 };
 
+export type SystemInfo = {
+  os: string;
+  version: string;
+  cpu: string;
+  arch: string;
+  cores: number;
+  memoryBytes: number;
+  diskTotalBytes: number;
+  diskFreeBytes: number;
+};
+
 export type Agent = {
   id: string;
   connectionId: string;
@@ -29,6 +40,8 @@ export type Agent = {
   direction: AgentDirection;
   docker?: DockerContainer[];
   dockerError?: string;
+  systemInfo?: SystemInfo;
+  systemInfoError?: string;
 };
 
 export async function fetchAgents(apiBase: string = API_BASE): Promise<Agent[]> {
@@ -71,6 +84,14 @@ export function subscribeToAgentEvents(
 export async function refreshDockerInfo(apiBase: string = API_BASE): Promise<void> {
   try {
     await fetch(`${apiBase}/agents/refresh-docker`, { method: "POST" });
+  } catch {
+    // ignore fire-and-forget errors; UI will still get updates if available
+  }
+}
+
+export async function refreshSystemInfo(apiBase: string = API_BASE): Promise<void> {
+  try {
+    await fetch(`${apiBase}/agents/refresh-system`, { method: "POST" });
   } catch {
     // ignore fire-and-forget errors; UI will still get updates if available
   }
