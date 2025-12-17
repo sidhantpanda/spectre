@@ -69,10 +69,23 @@ jobs:
         with:
           path: dist
 
-      - name: Prepare assets
+      - name: Normalize permissions and package artifacts
         run: |
+          set -euo pipefail
           mkdir -p upload
-          find dist -maxdepth 3 -type f -print -exec cp {} upload/ \;
+
+          shopt -s nullglob
+          for file in dist/**/* dist/*; do
+            [ -f "$file" ] || continue
+            base="$(basename "$file")"
+
+            if [[ "$base" == *.exe ]]; then
+              zip "upload/${base%.exe}.zip" "$file"
+            else
+              chmod +x "$file"
+              tar -C "$(dirname "$file")" -czf "upload/${base}.tar.gz" "$base"
+            fi
+          done
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2

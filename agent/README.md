@@ -76,6 +76,27 @@ Flags:
 - **Manual nightly:** From the GitHub Actions tab, run the “Nightly Agent Release” workflow to produce the latest prerelease artifacts without waiting for the scheduled run.
 - **Manual short-SHA release:** Run the “Manual Agent Release” workflow (`.github/workflows/release-agent-manual.yml`) to publish a release tagged `agent-sha-<short_sha>`, where `<short_sha>` is the 7-character short hash of the commit you triggered from.
 
+### Downloading and running released binaries
+Releases attach archives that preserve execute bits on Unix platforms and zips for Windows:
+
+- Linux: `spectre-agent-linux-amd64.tar.gz`, `spectre-agent-linux-arm64.tar.gz`
+- macOS: `spectre-agent-darwin-amd64.tar.gz`, `spectre-agent-darwin-arm64.tar.gz`
+- Windows: `spectre-agent-windows-amd64.zip`, `spectre-agent-windows-arm64.zip`
+
+Examples (replace `<tag>` with a release like `agent-v1.2.3` and choose the right arch):
+
+```bash
+# Linux/macOS
+curl -L -o spectre-agent.tar.gz "https://github.com/sidhantpanda/spectre/releases/download/<tag>/spectre-agent-linux-amd64.tar.gz"
+tar -xzf spectre-agent.tar.gz
+./spectre-agent-linux-amd64 -listen :8081 -token changeme -host ws://control-server-hostname:8080/agents/register
+
+# Windows (PowerShell)
+Invoke-WebRequest -Uri "https://github.com/sidhantpanda/spectre/releases/download/<tag>/spectre-agent-windows-amd64.zip" -OutFile spectre-agent.zip
+Expand-Archive spectre-agent.zip -DestinationPath .
+./spectre-agent-windows-amd64.exe -listen :8081 -token changeme -host ws://control-server-hostname:8080/agents/register
+```
+
 ## Notes
 - PTY mode enables proper handling of `sudo` password prompts and interactive programs.
 - The agent keeps running until terminated and will attempt to send heartbeats so the server can mark stale connections.
