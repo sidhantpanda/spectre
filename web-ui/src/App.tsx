@@ -245,7 +245,7 @@ function App() {
                           <Badge key={container.name} variant="outline" className="text-xs font-normal">
                             <span className="font-medium text-foreground">{container.name}</span>
                             <span className="ml-1 text-muted-foreground">
-                              {container.ports.length > 0 ? container.ports.join(", ") : "no ports"}
+                              {(container.ports ?? []).length > 0 ? container.ports.join(", ") : "no ports"}
                             </span>
                           </Badge>
                         ))

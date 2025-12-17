@@ -14,7 +14,7 @@ export type AgentFingerprint = {
 
 export type DockerContainer = {
   name: string;
-  ports: string[];
+  ports?: string[];
 };
 
 export type SystemInfo = {
