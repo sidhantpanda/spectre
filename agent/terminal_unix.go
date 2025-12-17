@@ -18,6 +18,11 @@ func startShell() *os.File {
 		shell = "/bin/bash"
 	}
 
+	homeDir, _ := os.UserHomeDir()
+	if homeDir == "" {
+		homeDir = os.Getenv("HOME")
+	}
+
 	env := os.Environ()
 	hasTERM := false
 	for _, e := range env {
@@ -33,6 +38,9 @@ func startShell() *os.File {
 	cmd := exec.Command(shell)
 	cmd.Env = env
 	cmd.SysProcAttr = c
+	if homeDir != "" {
+		cmd.Dir = homeDir
+	}
 
 	ptm, err := pty.Start(cmd)
 	if err != nil {
