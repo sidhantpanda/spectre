@@ -70,6 +70,9 @@ After=network.target
 
 [Service]
 Type=simple
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/bin
+Environment=SPECTRE_AGENT_HOME=/var/lib/spectre-agent
+StateDirectory=spectre-agent
 ExecStart=%s %s
 WorkingDirectory=%s
 Restart=always
