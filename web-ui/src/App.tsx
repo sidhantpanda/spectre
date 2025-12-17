@@ -223,65 +223,76 @@ function App() {
                     </div>
                     <p className="text-sm text-muted-foreground">{displayDeviceId(agent)}</p>
                     <p className="text-sm text-muted-foreground">{agent.address}</p>
-                    <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
-                      {agent.systemInfo ? (
-                        <>
-                          <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
-                            <Monitor size={14} /> {agent.systemInfo.os}
-                            {agent.systemInfo.version && (
-                              <span className="text-muted-foreground"> {agent.systemInfo.version}</span>
-                            )}
-                          </span>
-                          <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
-                            <Cpu size={14} /> {agent.systemInfo.cpu || "CPU"}
-                          </span>
-                          <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
-                            <Gauge size={14} /> {agent.systemInfo.cores} cores ({agent.systemInfo.arch})
-                          </span>
-                          <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
-                            <MemoryStick size={14} /> {formatBytes(agent.systemInfo.memoryBytes)}
-                          </span>
-                          <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
-                            <HardDrive size={14} /> {formatDisk(agent.systemInfo.diskFreeBytes, agent.systemInfo.diskTotalBytes)}
-                          </span>
-                        </>
-                      ) : agent.systemInfoError ? (
-                        <span className="text-xs text-destructive">System: {agent.systemInfoError}</span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">System info pending...</span>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
-                      {agent.networkInfo ? (
-                        <>
-                          <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
-                            <Network size={14} /> IPv4: {formatList(agent.networkInfo.ipv4)}
-                          </span>
-                          {/* <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
-                            <Network size={14} /> IPv6: {formatList(agent.networkInfo.ipv6)}
-                          </span> */}
-                        </>
-                      ) : agent.networkInfoError ? (
-                        <span className="text-xs text-destructive">Network: {agent.networkInfoError}</span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">Network info pending...</span>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 pt-1">
-                      {agent.docker && agent.docker.length > 0 ? (
-                        agent.docker.map((container) => (
-                          <Badge key={container.name} variant="outline" className="text-xs font-normal">
-                            <span className="font-medium text-foreground">{container.name}</span>
-                            <span className="ml-1 text-muted-foreground">
-                              {(container.ports ?? []).length > 0 ? container.ports.join(", ") : "no ports"}
+                    <div className="flex flex-col gap-2 pt-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">System Info</p>
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        {agent.systemInfo ? (
+                          <>
+                            <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
+                              <Monitor size={14} /> {agent.systemInfo.os}
+                              {agent.systemInfo.version && (
+                                <span className="text-muted-foreground"> {agent.systemInfo.version}</span>
+                              )}
                             </span>
-                          </Badge>
-                        ))
-                      ) : agent.dockerError ? (
-                        <span className="text-xs text-destructive">Docker: {agent.dockerError}</span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">Docker: no containers reported</span>
-                      )}
+                            <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
+                              <Cpu size={14} /> {agent.systemInfo.cpu || "CPU"}
+                            </span>
+                            <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
+                              <Gauge size={14} /> {agent.systemInfo.cores} cores ({agent.systemInfo.arch})
+                            </span>
+                            <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
+                              <MemoryStick size={14} /> {formatBytes(agent.systemInfo.memoryBytes)}
+                            </span>
+                            <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
+                              <HardDrive size={14} /> {formatDisk(agent.systemInfo.diskFreeBytes, agent.systemInfo.diskTotalBytes)}
+                            </span>
+                          </>
+                        ) : agent.systemInfoError ? (
+                          <span className="text-xs text-destructive">System: {agent.systemInfoError}</span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">System info pending...</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 pt-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Network Info</p>
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        {agent.networkInfo ? (
+                          <>
+                            <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
+                              <Network size={14} /> IPv4: {formatList(agent.networkInfo.ipv4)}
+                            </span>
+                            {/* <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
+                              <Network size={14} /> IPv6: {formatList(agent.networkInfo.ipv6)}
+                            </span> */}
+                          </>
+                        ) : agent.networkInfoError ? (
+                          <span className="text-xs text-destructive">Network: {agent.networkInfoError}</span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Network info pending...</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 pt-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Docker Containers
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {agent.docker && agent.docker.length > 0 ? (
+                          (agent.docker.sort((a, b) => a.name.localeCompare(b.name))).map((container) => (
+                            <Badge key={container.name} variant="outline" className="text-xs font-normal">
+                              <span className="font-medium text-foreground">{container.name}</span>
+                              <span className="ml-1 text-muted-foreground">
+                                {(container.ports ?? []).length > 0 ? container.ports.join(", ") : "no ports"}
+                              </span>
+                            </Badge>
+                          ))
+                        ) : agent.dockerError ? (
+                          <span className="text-xs text-destructive">Docker: {agent.dockerError}</span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Docker: no containers reported</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="text-xs text-muted-foreground text-right">
