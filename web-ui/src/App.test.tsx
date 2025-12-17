@@ -38,6 +38,7 @@ describe("App component", () => {
   beforeEach(() => {
     globalThis.fetch = vi.fn(() =>
       Promise.resolve({
+        ok: true,
         json: () => Promise.resolve([]),
       }) as unknown as Promise<Response>,
     );
@@ -66,11 +67,12 @@ describe("App component", () => {
   it("submits connection details", async () => {
     const fetchMock = globalThis.fetch as unknown as Mock;
     const responses = [
-      Promise.resolve({ json: () => Promise.resolve([]) }),
-      Promise.resolve({ json: () => Promise.resolve({}) }),
-      Promise.resolve({ json: () => Promise.resolve([]) }),
+      Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
+      Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
+      Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
     ];
-    fetchMock.mockImplementation(() => responses.shift() as Promise<Response>);
+    const fallback = Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+    fetchMock.mockImplementation(() => (responses.shift() ?? fallback) as Promise<Response>);
 
     render(
       <ThemeProvider>
@@ -88,11 +90,20 @@ describe("App component", () => {
     const submit = screen.getByRole("button", { name: /connect/i });
     fireEvent.click(submit);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, `${window.location.origin}/agents/connect`, {
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    const calls = fetchMock.mock.calls;
+
+    const connectCalls = calls.filter(([url]) => url === `${window.location.origin}/agents/connect`);
+    expect(connectCalls.length).toBeGreaterThanOrEqual(1);
+    expect(connectCalls[0]?.[1]).toMatchObject({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ address: "ws://test/ws", token: "secret" }),
     });
+
+    const agentFetches = calls.filter(([url]) => url === `${window.location.origin}/agents`);
+    // Initial load + post-submit refresh, with React 18 potentially double-invoking effects in tests.
+    expect(agentFetches.length).toBeGreaterThanOrEqual(2);
   });
 });
