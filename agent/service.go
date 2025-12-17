@@ -71,12 +71,13 @@ After=network.target
 [Service]
 Type=simple
 ExecStart=%s %s
+WorkingDirectory=%s
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-`, exe, strings.Join(args, " "))
+`, exe, strings.Join(args, " "), filepath.Dir(exe))
 
 	if err := os.WriteFile(systemdUnitPath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("write unit: %w", err)
@@ -88,6 +89,9 @@ WantedBy=multi-user.target
 	if err := runCommand("systemctl", "enable", "--now", "spectre-agent.service"); err != nil {
 		return err
 	}
+
+	// Show status for quick troubleshooting when invoked interactively.
+	_ = runCommand("systemctl", "status", "--no-pager", "spectre-agent.service")
 	return nil
 }
 
