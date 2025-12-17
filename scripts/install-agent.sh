@@ -52,7 +52,7 @@ curl -fL --retry 3 --retry-delay 2 "$asset_url" -o "$tmpdir/$asset_name"
 
 tar -xzf "$tmpdir/$asset_name" -C "$tmpdir"
 
-binary_path=$(find "$tmpdir" -maxdepth 1 -type f -name "spectre-agent-*" | head -n1)
+binary_path=$(find "$tmpdir" -type f \( -name "spectre-agent" -o -name "spectre-agent-*" \) ! -name "*.tar.gz" ! -name "*.zip" | head -n1)
 if [[ -z "$binary_path" ]]; then
   echo "error: binary not found after extraction" >&2
   exit 1
