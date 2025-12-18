@@ -1,0 +1,18 @@
+services:
+  server:
+    image: ghcr.io/sidhantpanda/spectre/server
+    container_name: spectre-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+
+  web-ui:
+    image: ghcr.io/sidhantpanda/spectre/web-ui
+    container_name: spectre-web-ui
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    environment:
+      - SPECTRE_SERVER_HOST=http://localhost:8080
