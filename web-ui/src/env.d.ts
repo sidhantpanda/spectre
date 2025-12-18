@@ -1,5 +1,5 @@
 interface Window {
   __ENV?: {
-    VITE_API_BASE?: string;
+    SPECTRE_SERVER_HOST?: string;
   };
 }

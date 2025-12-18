@@ -1,11 +1,14 @@
 const RUNTIME_BASE =
-  typeof window !== "undefined" && window.__ENV?.VITE_API_BASE && window.__ENV.VITE_API_BASE.length > 0
-    ? window.__ENV.VITE_API_BASE
+  typeof window !== "undefined" &&
+  window.__ENV?.SPECTRE_SERVER_HOST &&
+  window.__ENV.SPECTRE_SERVER_HOST.length > 0
+    ? window.__ENV.SPECTRE_SERVER_HOST
     : undefined;
 const ENV_BASE =
   RUNTIME_BASE ??
-  ((import.meta.env.VITE_API_BASE as string | undefined) && (import.meta.env.VITE_API_BASE as string).length > 0
-    ? (import.meta.env.VITE_API_BASE as string)
+  ((import.meta.env.SPECTRE_SERVER_HOST as string | undefined) &&
+    (import.meta.env.SPECTRE_SERVER_HOST as string).length > 0
+    ? (import.meta.env.SPECTRE_SERVER_HOST as string)
     : undefined);
 
 export function getApiBase() {
