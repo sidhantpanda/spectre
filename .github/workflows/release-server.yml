@@ -34,9 +34,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=semver,pattern=server-v{{version}},value={{version}}
+            type=semver,pattern=server-v{{version}},value={{major}}.{{minor}}
+            type=semver,pattern=server-v{{version}},value={{major}}
+            type=raw,value=latest
             type=sha
 
       - name: Set up Docker Buildx
