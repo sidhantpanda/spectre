@@ -126,6 +126,7 @@ function attemptOutboundConnection(id: string, address: string, backoffMs = 1000
         entry.record.deviceId = deviceId;
         entry.record.remoteAgentId = deviceId;
         entry.record.fingerprint = payload.fingerprint;
+        entry.record.agentVersion = payload.agentVersion;
         emitStatus(entry.record);
         requestDockerInfo(id);
         requestSystemInfo(id);
@@ -222,6 +223,7 @@ export function registerInboundAgent(socket: WebSocket, token: string, address: 
         entry.record.deviceId = deviceId;
         entry.record.remoteAgentId = deviceId;
         entry.record.fingerprint = payload.fingerprint;
+        entry.record.agentVersion = payload.agentVersion;
         agents.set(id, entry);
         socket.send(JSON.stringify({ type: "hello", token } satisfies ControlMessage));
         emitStatus(entry.record);

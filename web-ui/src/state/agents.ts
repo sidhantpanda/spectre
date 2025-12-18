@@ -40,6 +40,7 @@ export type Agent = {
   status: AgentStatus;
   lastSeen: number;
   deviceId?: string;
+  agentVersion?: string;
   fingerprint?: AgentFingerprint;
   remoteAgentId?: string;
   direction: AgentDirection;

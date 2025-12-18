@@ -38,9 +38,10 @@ func newAgentServer(addr, token, deviceID string, fingerprint map[string]any) *a
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"agentId":     s.deviceID,
-			"deviceId":    s.deviceID,
-			"fingerprint": s.fingerprint,
+			"agentId":      s.deviceID,
+			"deviceId":     s.deviceID,
+			"agentVersion": getAgentVersion(),
+			"fingerprint":  s.fingerprint,
 		})
 	})
 
@@ -63,7 +64,12 @@ func newAgentServer(addr, token, deviceID string, fingerprint map[string]any) *a
 			return
 		}
 
-		ack := AgentMessage{Type: "hello", AgentID: s.deviceID, Fingerprint: s.fingerprint}
+		ack := AgentMessage{
+			Type:         "hello",
+			AgentID:      s.deviceID,
+			AgentVersion: getAgentVersion(),
+			Fingerprint:  s.fingerprint,
+		}
 		if err := conn.WriteJSON(ack); err != nil {
 			log.Printf("failed to send handshake ack: %v", err)
 			return

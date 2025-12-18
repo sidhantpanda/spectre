@@ -36,6 +36,7 @@ export interface AgentRecord {
   status: AgentStatus;
   lastSeen: number;
   deviceId?: string;
+  agentVersion?: string;
   fingerprint?: AgentFingerprint;
   remoteAgentId?: string;
   direction: AgentDirection;
@@ -56,7 +57,7 @@ export type ControlMessage =
   | { type: "networkInfo" };
 
 export type AgentMessage =
-  | { type: "hello"; agentId: string; fingerprint: AgentFingerprint }
+  | { type: "hello"; agentId: string; fingerprint: AgentFingerprint; agentVersion?: string }
   | { type: "output"; data: string; sessionId?: string }
   | { type: "heartbeat" }
   | { type: "dockerInfo"; containers?: DockerContainer[]; error?: string }

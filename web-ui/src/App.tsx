@@ -219,6 +219,11 @@ function App() {
                       <Badge variant="secondary" className="capitalize">
                         {agent.direction}
                       </Badge>
+                      {agent.agentVersion && (
+                        <Badge variant="outline" className="font-mono text-[11px]">
+                          {agent.agentVersion}
+                        </Badge>
+                      )}
                       <p className="font-medium">{agent.fingerprint?.hostname ?? displayDeviceId(agent)}</p>
                     </div>
                     <p className="text-sm text-muted-foreground">{displayDeviceId(agent)}</p>

@@ -47,7 +47,8 @@ jobs:
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
           export CGO_ENABLED=0
-          go build -o ../dist/spectre-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} .
+          export VERSION="${GITHUB_REF_NAME}"
+          go build -ldflags "-X main.agentVersion=${VERSION}" -o ../dist/spectre-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

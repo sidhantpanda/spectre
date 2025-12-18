@@ -43,7 +43,12 @@ func connectToControlServer(host, token, deviceID string, fingerprint map[string
 
 		log.Printf("connected to control server via %s", wsURL)
 
-		hello := AgentMessage{Type: "hello", AgentID: deviceID, Fingerprint: fingerprint}
+		hello := AgentMessage{
+			Type:         "hello",
+			AgentID:      deviceID,
+			AgentVersion: getAgentVersion(),
+			Fingerprint:  fingerprint,
+		}
 		if err := conn.WriteJSON(hello); err != nil {
 			log.Printf("failed to send handshake to control server: %v", err)
 			conn.Close()
