@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,22 +17,14 @@ const (
 	launchdLabel     = "com.spectre.agent"
 )
 
-func serviceUp(rawArgs []string) error {
-	fs := flag.NewFlagSet("up", flag.ContinueOnError)
-	listen := fs.String("listen", ":8081", "Address for the agent API and WebSocket server")
-	token := fs.String("token", "changeme", "Auth token expected from the control server")
-	host := fs.String("host", "", "Optional control server host (ws://host:port/agents/register) to initiate a connection")
-	if err := fs.Parse(rawArgs); err != nil {
-		return err
-	}
-
+func serviceUp(listen, token, host string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
 
-	args := buildExecArgs(*listen, *token, *host)
+	args := buildExecArgs(listen, token, host)
 
 	switch runtime.GOOS {
 	case "linux":

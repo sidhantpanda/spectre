@@ -53,12 +53,50 @@ GOOS=linux GOARCH=amd64 go build -o spectre-agent ./...
 ```
 The resulting `spectre-agent` binary can be dropped into `/usr/local/bin` on Linux hosts.
 
+### Building locally (native arch)
+```bash
+cd agent
+go build -o spectre-agent .
+```
+This produces `./spectre-agent` for your current OS/architecture.
+
 ## Running
+### Run directly from source (no build)
+```bash
+cd agent
+go run . \
+  --listen :8081 \
+  --token changeme \
+  --host ws://localhost:8080/agents/register
+```
+
+### Run the locally built binary
+```bash
+cd agent
+./spectre-agent \
+  --listen :8081 \
+  --token changeme \
+  --host ws://localhost:8080/agents/register
+```
+
+### Start as a background service (systemd/launchd)
+```bash
+sudo ./spectre-agent up \
+  --listen :8081 \
+  --token changeme \
+  --host ws://localhost:8080/agents/register
+```
+
+### Stop and remove the installed service
+```bash
+sudo ./spectre-agent down
+```
+
 ```bash
 ./spectre-agent \
-  -listen :8081 \
-  -token changeme \
-  -host ws://control-server:8080/agents/register
+  --listen :8081 \
+  --token changeme \
+  --host ws://control-server:8080/agents/register
 
 For local development, you can run `./dev.sh ws://localhost:8080/agents/register <token>` (or set `AGENT_HOST`/`AGENT_TOKEN`). The script also extracts `token=` from the URL if present.
 
@@ -66,9 +104,9 @@ If you start a second agent process on the same machine, it will exit and print 
 ```
 
 Flags:
-- `-listen` — Address to expose the agent API and WebSocket endpoint (default `:8081`).
-- `-token` — Shared auth token expected from the control server.
-- `-host` — Optional control server WebSocket endpoint for agent-initiated connections (e.g., `ws://control:8080/agents/register`).
+- `--listen` — Address to expose the agent API and WebSocket endpoint (default `:8081`).
+- `--token` — Shared auth token expected from the control server.
+- `--host` — Optional control server WebSocket endpoint for agent-initiated connections (e.g., `ws://control:8080/agents/register`).
 
 ## Releases
 - **Tagged releases:** Push a Git tag matching `agent-v*` to trigger `.github/workflows/release-agent.yml`, which cross-compiles the agent (linux/darwin/windows on amd64/arm64) and publishes a GitHub Release with all binaries attached.
