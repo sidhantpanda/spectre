@@ -4,6 +4,7 @@ import { Button } from "../components/ui/button";
 import { AgentTerminal } from "../components/AgentTerminal";
 import { AgentStatusDot } from "../components/AgentStatusDot";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { VersionFooter } from "../components/VersionFooter";
 import { Agent, fetchAgents, subscribeToAgentEvents } from "../state/agents";
 import { getApiBase } from "../lib/api";
 
@@ -142,6 +143,7 @@ export default function TerminalPage() {
           />
         )}
       </section>
+      <VersionFooter apiBase={API_BASE} />
     </main>
   );
 }

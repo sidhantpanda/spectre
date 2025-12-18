@@ -16,6 +16,9 @@ FROM node:24-alpine
 
 WORKDIR /app
 
+ARG VERSION
+ENV SPECTRE_SERVER_VERSION=$VERSION
+
 COPY package*.json ./
 RUN npm ci --omit=dev
 

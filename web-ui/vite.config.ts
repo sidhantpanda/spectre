@@ -29,6 +29,11 @@ export default defineConfig({
         ws: true,
         secure: false,
       },
+      "/version": {
+        target: CONTROL_SERVER_TARGET,
+        changeOrigin: true,
+        secure: false,
+      },
     },
   },
   test: {

@@ -6,6 +6,7 @@ import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
 import { AgentStatusDot } from "./components/AgentStatusDot";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { VersionFooter } from "./components/VersionFooter";
 import type { Agent } from "./state/agents";
 import {
   fetchAgents,
@@ -332,6 +333,7 @@ function App() {
           </Card>
         </div>
       </section>
+      <VersionFooter apiBase={API_BASE} />
     </main>
   );
 }

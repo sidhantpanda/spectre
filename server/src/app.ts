@@ -9,6 +9,7 @@ import {
   refreshAllSystemInfo,
 } from "./agentRegistry";
 import { AUTH_TOKEN, CORS_ORIGIN } from "./config";
+import { getServerVersion } from "./version";
 
 export function createApp(
   deps: AgentDependencies = {
@@ -47,6 +48,10 @@ export function createApp(
 
   app.get("/agents", (_req: Request, res: Response) => {
     res.json(deps.listAgents());
+  });
+
+  app.get("/version", (_req: Request, res: Response) => {
+    res.json({ version: getServerVersion() });
   });
 
   app.post("/agents/connect", (req: Request, res: Response) => {

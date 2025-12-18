@@ -1,3 +1,4 @@
 window.__ENV = {
-  SPECTRE_SERVER_HOST: ""
+  SPECTRE_SERVER_HOST: "",
+  SPECTRE_WEB_UI_VERSION: ""
 };
