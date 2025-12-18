@@ -28,15 +28,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Derive version for image tags
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#web-ui-v}"
+          IFS='.' read -r major minor patch <<EOF
+          $version
+          EOF
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "major_minor=$major.$minor" >> "$GITHUB_OUTPUT"
+          echo "major=$major" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern=web-ui-v{{version}},value={{version}}
-            type=semver,pattern=web-ui-v{{version}},value={{major}}.{{minor}}
-            type=semver,pattern=web-ui-v{{version}},value={{major}}
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=${{ steps.version.outputs.major_minor }}
+            type=raw,value=${{ steps.version.outputs.major }}
             type=raw,value=latest
             type=sha
 
