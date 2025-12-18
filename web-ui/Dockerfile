@@ -2,9 +2,6 @@ FROM node:24-alpine AS build
 
 WORKDIR /app
 
-ARG VITE_API_BASE=""
-ENV VITE_API_BASE=$VITE_API_BASE
-
 COPY package.json package-lock.json ./
 RUN npm ci
 
@@ -14,7 +11,10 @@ RUN npm run build
 FROM nginx:1.29.4-alpine
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY docker-entrypoint.sh /docker-entrypoint.d/99-env.sh
 COPY --from=build /app/dist /usr/share/nginx/html
+
+RUN chmod +x /docker-entrypoint.d/99-env.sh
 
 EXPOSE 80
 

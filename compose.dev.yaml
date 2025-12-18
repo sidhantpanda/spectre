@@ -11,10 +11,10 @@ services:
   web-ui:
     build:
       context: ./web-ui
-      args:
-        VITE_API_BASE: "http://localhost:8080"
     image: spectre-web-ui:dev
     ports:
       - "3000:80"
+    environment:
+      - VITE_API_BASE=http://localhost:8080
     depends_on:
       - server

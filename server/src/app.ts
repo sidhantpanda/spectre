@@ -8,7 +8,7 @@ import {
   refreshAllNetworkInfo,
   refreshAllSystemInfo,
 } from "./agentRegistry";
-import { AUTH_TOKEN } from "./config";
+import { AUTH_TOKEN, CORS_ORIGIN } from "./config";
 
 export function createApp(
   deps: AgentDependencies = {
@@ -23,9 +23,20 @@ export function createApp(
 ) {
   const app = express();
   app.use(express.json());
+  const allowedOrigins = CORS_ORIGIN.split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
+  const allowAnyOrigin = allowedOrigins.includes("*");
   app.use((req: Request, res: Response, next: NextFunction) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Headers", "Content-Type");
+    const origin = req.headers.origin;
+    if (allowAnyOrigin) {
+      res.header("Access-Control-Allow-Origin", "*");
+    } else if (origin && allowedOrigins.includes(origin)) {
+      res.header("Access-Control-Allow-Origin", origin);
+      res.header("Vary", "Origin");
+    }
+    const requestHeaders = req.header("Access-Control-Request-Headers");
+    res.header("Access-Control-Allow-Headers", requestHeaders || "Content-Type, Authorization");
     res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
     if (req.method === "OPTIONS") {
       res.sendStatus(200);
