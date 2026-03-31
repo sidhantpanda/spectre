@@ -25,44 +25,46 @@ func main() {
 }
 
 func newRootCommand() *cobra.Command {
-	var listen, token, host string
+	var listen, token, host, enroll string
 	cmd := &cobra.Command{
 		Use:          "spectre-agent",
 		Short:        "Run the Spectre agent server",
 		Long:         "Starts the Spectre agent API and WebSocket server for remote control connections.",
-		Example:      "spectre-agent --listen :8081 --token changeme --host ws://host:8080/agents/register",
+		Example:      "spectre-agent --listen :8081 --host ws://host:8080 --enroll <token>",
 		SilenceUsage: true,
 		Args:         cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runAgent(listen, token, host)
+			return runAgent(listen, token, host, enroll)
 		},
 	}
 
 	cmd.Flags().StringVar(&listen, "listen", ":8081", "Address for the agent API and WebSocket server")
-	cmd.Flags().StringVar(&token, "token", "changeme", "Auth token expected from the control server")
-	cmd.Flags().StringVar(&host, "host", "", "Optional control server host (ws://host:port/agents/register) to initiate a connection")
+	cmd.Flags().StringVar(&token, "token", "changeme", "Auth token for outbound connections from the control server")
+	cmd.Flags().StringVar(&host, "host", "", "Control server host (ws://host:port) to register with")
+	cmd.Flags().StringVar(&enroll, "enroll", "", "One-time enrollment token from the control server")
 
 	cmd.AddCommand(newUpCommand(), newDownCommand())
 	return cmd
 }
 
 func newUpCommand() *cobra.Command {
-	var listen, token, host string
+	var listen, token, host, enroll string
 	cmd := &cobra.Command{
 		Use:          "up",
 		Short:        "Install and start spectre-agent as a service",
 		Long:         "Installs spectre-agent as a system service (systemd or launchd) and starts it with the provided flags.",
-		Example:      "spectre-agent up --listen :8081 --token changeme --host ws://host:8080/agents/register",
+		Example:      "spectre-agent up --listen :8081 --host ws://host:8080 --enroll <token>",
 		SilenceUsage: true,
 		Args:         cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return serviceUp(listen, token, host)
+			return serviceUp(listen, token, host, enroll)
 		},
 	}
 
 	cmd.Flags().StringVar(&listen, "listen", ":8081", "Address for the agent API and WebSocket server")
-	cmd.Flags().StringVar(&token, "token", "changeme", "Auth token expected from the control server")
-	cmd.Flags().StringVar(&host, "host", "", "Optional control server host (ws://host:port/agents/register) to initiate a connection")
+	cmd.Flags().StringVar(&token, "token", "changeme", "Auth token for outbound connections from the control server")
+	cmd.Flags().StringVar(&host, "host", "", "Control server host (ws://host:port) to register with")
+	cmd.Flags().StringVar(&enroll, "enroll", "", "One-time enrollment token from the control server")
 
 	return cmd
 }
@@ -99,7 +101,7 @@ func handleCommandError(cmd *cobra.Command, err error) {
 	cmd.PrintErrf("Run '%s --help' for usage.\n", cmd.CommandPath())
 }
 
-func runAgent(listen, token, host string) error {
+func runAgent(listen, token, host, enrollToken string) error {
 	deviceInfo, err := ensureDeviceInfo()
 	if err != nil {
 		return fmt.Errorf("failed to load device id: %w", err)
@@ -137,7 +139,7 @@ func runAgent(listen, token, host string) error {
 	server := newAgentServer(listen, token, agentID, fingerprint)
 
 	if host != "" {
-		go connectToControlServer(host, token, agentID, fingerprint)
+		go connectToControlServer(host, token, enrollToken, &deviceInfo, fingerprint)
 	}
 
 	errCh := make(chan error, 1)

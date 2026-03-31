@@ -10,13 +10,36 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// connectToControlServer dials the control server (when provided via CLI flag)
-// and establishes the same shell bridge used for inbound connections.
-func connectToControlServer(host, token, deviceID string, fingerprint map[string]any) {
+// connectToControlServer dials the control server and establishes the shell bridge.
+// It supports three auth modes: enrollment token (first time), stored device key
+// (subsequent connections), or legacy shared token (backward compat).
+func connectToControlServer(host, legacyToken, enrollToken string, deviceInfo *DeviceInfo, fingerprint map[string]any) {
+	deviceKey := deviceInfo.DeviceKey
+
+	if deviceKey != "" {
+		enrollToken = ""
+		log.Printf("using stored device key for control server auth")
+	}
+
+	if strings.HasPrefix(host, "ws://") || (!strings.Contains(host, "://") && !strings.HasPrefix(host, "wss://")) {
+		log.Printf("WARNING: connecting to control server over unencrypted ws://. Use wss:// in production.")
+	}
+
+	useLegacy := enrollToken == "" && deviceKey == ""
+	if useLegacy {
+		log.Printf("no device key or enrollment token; using legacy token auth")
+	}
 
 	backoff := time.Second
 	for {
-		wsURL, err := buildControlServerURL(host, token)
+		var wsURL string
+		var err error
+
+		if useLegacy {
+			wsURL, err = buildControlServerURL(host, legacyToken)
+		} else {
+			wsURL, err = buildControlServerURLWithAuth(host, deviceKey, enrollToken)
+		}
 		if err != nil {
 			log.Printf("invalid control server host %q: %v", host, err)
 			return
@@ -45,7 +68,7 @@ func connectToControlServer(host, token, deviceID string, fingerprint map[string
 
 		hello := AgentMessage{
 			Type:         "hello",
-			AgentID:      deviceID,
+			AgentID:      deviceInfo.DeviceID,
 			AgentVersion: getAgentVersion(),
 			Fingerprint:  fingerprint,
 		}
@@ -73,13 +96,25 @@ func connectToControlServer(host, token, deviceID string, fingerprint map[string
 			continue
 		}
 
+		if ack.DeviceKey != "" {
+			deviceInfo.DeviceKey = ack.DeviceKey
+			if err := saveDeviceInfo(*deviceInfo); err != nil {
+				log.Printf("warning: failed to persist device key: %v", err)
+			} else {
+				log.Printf("enrolled successfully, device key stored")
+			}
+			deviceKey = ack.DeviceKey
+			enrollToken = ""
+			useLegacy = false
+		}
+
+		backoff = time.Second
+
 		sessions := newPtyManager()
 		errCh := make(chan error, 1)
 		startPTY := func(session *ptySession) {
 			go readFromPTY(conn, session, errCh)
 		}
-		// Ensure there is always a default session available when the control server
-		// does not send an explicit session identifier (e.g., legacy clients).
 		sessions.reset("default")
 		go readFromControl(conn, sessions, errCh, startPTY)
 		go sendHeartbeats(conn, errCh)

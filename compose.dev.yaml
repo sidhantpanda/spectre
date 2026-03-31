@@ -7,6 +7,10 @@ services:
       - "8080:8080"
     environment:
       - PORT=8080
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - DATA_DIR=/data
+    volumes:
+      - server_data:/data
 
   web-ui:
     build:
@@ -16,3 +20,6 @@ services:
       - "3000:80"
     environment:
       - SPECTRE_SERVER_HOST=http://localhost:8080
+
+volumes:
+  server_data:

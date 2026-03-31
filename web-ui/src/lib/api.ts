@@ -1,3 +1,5 @@
+import { getStoredToken } from "./auth";
+
 const RUNTIME_BASE =
   typeof window !== "undefined" &&
   window.__ENV?.SPECTRE_SERVER_HOST &&
@@ -19,5 +21,9 @@ export function buildWsUrl(path: string, apiBase?: string) {
   const base = apiBase && apiBase.length > 0 ? apiBase : getApiBase();
   const url = new URL(path, base);
   url.protocol = url.protocol.replace("http", "ws");
+  const token = getStoredToken();
+  if (token) {
+    url.searchParams.set("authToken", token);
+  }
   return url.toString();
 }

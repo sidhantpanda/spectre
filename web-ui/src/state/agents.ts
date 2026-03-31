@@ -1,4 +1,5 @@
 import { buildWsUrl, getApiBase } from "../lib/api";
+import { authFetch } from "../lib/auth";
 
 const API_BASE = getApiBase();
 
@@ -53,7 +54,7 @@ export type Agent = {
 };
 
 export async function fetchAgents(apiBase: string = API_BASE): Promise<Agent[]> {
-  const res = await fetch(`${apiBase}/agents`);
+  const res = await authFetch(`${apiBase}/agents`);
   if (!res.ok) throw new Error("failed to fetch agents");
   return res.json();
 }
@@ -91,24 +92,24 @@ export function subscribeToAgentEvents(
 
 export async function refreshDockerInfo(apiBase: string = API_BASE): Promise<void> {
   try {
-    await fetch(`${apiBase}/agents/refresh-docker`, { method: "POST" });
+    await authFetch(`${apiBase}/agents/refresh-docker`, { method: "POST" });
   } catch {
-    // ignore fire-and-forget errors; UI will still get updates if available
+    // ignore fire-and-forget errors
   }
 }
 
 export async function refreshSystemInfo(apiBase: string = API_BASE): Promise<void> {
   try {
-    await fetch(`${apiBase}/agents/refresh-system`, { method: "POST" });
+    await authFetch(`${apiBase}/agents/refresh-system`, { method: "POST" });
   } catch {
-    // ignore fire-and-forget errors; UI will still get updates if available
+    // ignore fire-and-forget errors
   }
 }
 
 export async function refreshNetworkInfo(apiBase: string = API_BASE): Promise<void> {
   try {
-    await fetch(`${apiBase}/agents/refresh-network`, { method: "POST" });
+    await authFetch(`${apiBase}/agents/refresh-network`, { method: "POST" });
   } catch {
-    // ignore fire-and-forget errors; UI will still get updates if available
+    // ignore fire-and-forget errors
   }
 }

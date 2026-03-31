@@ -184,7 +184,7 @@ function attemptOutboundConnection(id: string, address: string, backoffMs = 1000
   });
 }
 
-export function registerInboundAgent(socket: WebSocket, token: string, address: string) {
+export function registerInboundAgent(socket: WebSocket, token: string, address: string, deviceKey?: string) {
   const id = uuid();
   const entry: AgentEntry = {
     socket,
@@ -225,7 +225,10 @@ export function registerInboundAgent(socket: WebSocket, token: string, address: 
         entry.record.fingerprint = payload.fingerprint;
         entry.record.agentVersion = payload.agentVersion;
         agents.set(id, entry);
-        socket.send(JSON.stringify({ type: "hello", token } satisfies ControlMessage));
+        const helloMsg: ControlMessage = deviceKey
+          ? { type: "hello", token, deviceKey }
+          : { type: "hello", token };
+        socket.send(JSON.stringify(helloMsg));
         emitStatus(entry.record);
         requestDockerInfo(id);
         requestSystemInfo(id);
@@ -343,4 +346,28 @@ export function refreshAllNetworkInfo() {
       requestNetworkInfo(id);
     }
   }
+}
+
+const STALE_THRESHOLD_MS = 90_000;
+const SWEEP_INTERVAL_MS = 60_000;
+
+function sweepStaleAgents() {
+  const cutoff = now() - STALE_THRESHOLD_MS;
+  for (const [id, entry] of agents.entries()) {
+    if (entry.record.status !== "connected") continue;
+    if (entry.record.lastSeen < cutoff) {
+      console.log(`[sweep] evicting stale agent ${id} (last seen ${Math.round((now() - entry.record.lastSeen) / 1000)}s ago)`);
+      entry.record.status = "disconnected";
+      entry.record.lastSeen = now();
+      agents.set(id, entry);
+      if (entry.socket && entry.socket.readyState === WebSocket.OPEN) {
+        entry.socket.close(4002, "heartbeat timeout");
+      }
+      emitStatus(entry.record);
+    }
+  }
+}
+
+export function startStaleAgentSweep() {
+  return setInterval(sweepStaleAgents, SWEEP_INTERVAL_MS);
 }

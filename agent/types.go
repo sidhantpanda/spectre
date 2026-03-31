@@ -27,9 +27,10 @@ type NetworkInfo struct {
 
 // ControlMessage documents what the agent can receive from the control server.
 type ControlMessage struct {
-	Type  string `json:"type"`
-	Token string `json:"token,omitempty"`
-	Data  string `json:"data,omitempty"`
+	Type      string `json:"type"`
+	Token     string `json:"token,omitempty"`
+	DeviceKey string `json:"deviceKey,omitempty"`
+	Data      string `json:"data,omitempty"`
 	// SessionID differentiates simultaneous PTY sessions.
 	SessionID string `json:"sessionId,omitempty"`
 }

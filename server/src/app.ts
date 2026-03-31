@@ -8,7 +8,13 @@ import {
   refreshAllNetworkInfo,
   refreshAllSystemInfo,
 } from "./agentRegistry";
+import { authMiddleware, isAuthEnabled, login } from "./auth";
 import { AUTH_TOKEN, CORS_ORIGIN } from "./config";
+import {
+  createEnrollmentToken,
+  listDevices,
+  isInitialized as isDeviceStoreInitialized,
+} from "./deviceStore";
 import { getServerVersion } from "./version";
 
 export function createApp(
@@ -45,6 +51,24 @@ export function createApp(
     }
     next();
   });
+
+  app.get("/auth/status", (_req: Request, res: Response) => {
+    res.json({ authEnabled: isAuthEnabled() });
+  });
+
+  app.post("/auth/login", (req: Request, res: Response) => {
+    const { password } = req.body as { password?: string };
+    if (!password) {
+      return res.status(400).json({ error: "missing password" });
+    }
+    const token = login(password);
+    if (!token) {
+      return res.status(401).json({ error: "invalid password" });
+    }
+    res.json({ token });
+  });
+
+  app.use(authMiddleware);
 
   app.get("/agents", (_req: Request, res: Response) => {
     res.json(deps.listAgents());
@@ -96,6 +120,21 @@ export function createApp(
       deps.refreshNetworkInfo();
     }
     res.json({ status: "requested" });
+  });
+
+  app.post("/devices/enroll", (_req: Request, res: Response) => {
+    if (!isDeviceStoreInitialized()) {
+      return res.status(503).json({ error: "device store not initialized" });
+    }
+    const record = createEnrollmentToken();
+    res.json({ token: record.token, expiresAt: record.expiresAt });
+  });
+
+  app.get("/devices", (_req: Request, res: Response) => {
+    if (!isDeviceStoreInitialized()) {
+      return res.json([]);
+    }
+    res.json(listDevices());
   });
 
   return app;

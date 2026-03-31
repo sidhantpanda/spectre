@@ -1,5 +1,5 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { Cpu, Gauge, HardDrive, MemoryStick, Monitor, Network } from "lucide-react";
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { Check, Copy, Cpu, Gauge, HardDrive, MemoryStick, Monitor, Network } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -16,6 +16,7 @@ import {
   subscribeToAgentEvents,
 } from "./state/agents";
 import { getApiBase } from "./lib/api";
+import { authFetch } from "./lib/auth";
 
 const API_BASE = getApiBase();
 
@@ -80,6 +81,9 @@ function App() {
   const [address, setAddress] = useState("");
   const [token, setToken] = useState("changeme");
   const [isConnecting, setIsConnecting] = useState(false);
+  const [enrollmentToken, setEnrollmentToken] = useState<{ token: string; expiresAt: number } | null>(null);
+  const [isEnrolling, setIsEnrolling] = useState(false);
+  const [copied, setCopied] = useState(false);
   const navigate = useNavigate();
 
   async function loadAgents() {
@@ -126,7 +130,7 @@ function App() {
     if (!address) return;
     setIsConnecting(true);
     try {
-      await fetch(`${API_BASE}/agents/connect`, {
+      await authFetch(`${API_BASE}/agents/connect`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -140,6 +144,34 @@ function App() {
     } finally {
       setIsConnecting(false);
     }
+  }
+
+  async function handleEnroll() {
+    setIsEnrolling(true);
+    setCopied(false);
+    try {
+      const res = await authFetch(`${API_BASE}/devices/enroll`, { method: "POST" });
+      if (!res.ok) throw new Error("failed to create enrollment token");
+      const data = await res.json();
+      setEnrollmentToken(data);
+    } catch (err) {
+      console.error("failed to enroll", err);
+    } finally {
+      setIsEnrolling(false);
+    }
+  }
+
+  const enrollCommand = useCallback(() => {
+    if (!enrollmentToken) return "";
+    const wsHost = API_BASE.replace(/^http/, "ws");
+    return `spectre-agent up --host ${wsHost} --enroll ${enrollmentToken.token}`;
+  }, [enrollmentToken]);
+
+  function copyEnrollCommand() {
+    navigator.clipboard.writeText(enrollCommand()).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   }
 
   return (
@@ -160,9 +192,43 @@ function App() {
       <section className="mx-auto max-w-5xl px-6 py-10 space-y-8">
         <Card>
           <CardHeader>
-            <CardTitle>Connect to agent</CardTitle>
+            <CardTitle>Add Device</CardTitle>
             <CardDescription>
-              Enter the remote agent address (ws://host:port/ws) and optional token for the control server to connect.
+              Generate an enrollment token and run the command on your remote machine to register it.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {enrollmentToken ? (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">Run this command on the remote machine:</p>
+                <div className="flex items-center gap-2">
+                  <code className="block flex-1 overflow-x-auto rounded-md bg-muted px-3 py-2 text-sm font-mono whitespace-nowrap">
+                    {enrollCommand()}
+                  </code>
+                  <Button variant="outline" size="sm" onClick={copyEnrollCommand}>
+                    {copied ? <Check size={14} /> : <Copy size={14} />}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Token expires at {new Date(enrollmentToken.expiresAt).toLocaleTimeString()}
+                </p>
+                <Button variant="secondary" size="sm" onClick={() => setEnrollmentToken(null)}>
+                  Generate new token
+                </Button>
+              </div>
+            ) : (
+              <Button onClick={handleEnroll} disabled={isEnrolling}>
+                {isEnrolling ? "Generating..." : "Generate Enrollment Token"}
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Connect to agent (outbound)</CardTitle>
+            <CardDescription>
+              Manually connect to an agent by address. Use this for agents with a reachable WebSocket server.
             </CardDescription>
           </CardHeader>
           <CardContent>

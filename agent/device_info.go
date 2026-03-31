@@ -11,7 +11,8 @@ import (
 )
 
 type DeviceInfo struct {
-	DeviceID string `json:"deviceId"`
+	DeviceID  string `json:"deviceId"`
+	DeviceKey string `json:"deviceKey,omitempty"`
 }
 
 func deviceInfoPath() (string, error) {
@@ -52,6 +53,21 @@ func ensureDeviceInfo() (DeviceInfo, error) {
 		return DeviceInfo{}, err
 	}
 	return info, nil
+}
+
+func saveDeviceInfo(info DeviceInfo) error {
+	path, err := deviceInfoPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	payload, err := json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, payload, 0o644)
 }
 
 func generateDeviceID() string {

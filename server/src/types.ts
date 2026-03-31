@@ -49,7 +49,7 @@ export interface AgentRecord {
 }
 
 export type ControlMessage =
-  | { type: "hello"; token: string }
+  | { type: "hello"; token: string; deviceKey?: string }
   | { type: "keystroke"; data: string; sessionId?: string }
   | { type: "reset"; sessionId?: string }
   | { type: "dockerInfo" }

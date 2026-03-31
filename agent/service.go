@@ -17,14 +17,14 @@ const (
 	launchdLabel     = "com.spectre.agent"
 )
 
-func serviceUp(listen, token, host string) error {
+func serviceUp(listen, token, host, enroll string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
 
-	args := buildExecArgs(listen, token, host)
+	args := buildExecArgs(listen, token, host, enroll)
 
 	switch runtime.GOOS {
 	case "linux":
@@ -47,10 +47,13 @@ func serviceDown() error {
 	}
 }
 
-func buildExecArgs(listen, token, host string) []string {
+func buildExecArgs(listen, token, host, enroll string) []string {
 	args := []string{fmt.Sprintf("-listen=%s", listen), fmt.Sprintf("-token=%s", token)}
 	if host != "" {
 		args = append(args, fmt.Sprintf("-host=%s", host))
+	}
+	if enroll != "" {
+		args = append(args, fmt.Sprintf("-enroll=%s", enroll))
 	}
 	return args
 }

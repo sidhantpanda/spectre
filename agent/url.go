@@ -48,7 +48,8 @@ func guessLocalIPv4() string {
 
 // buildControlServerURL normalizes a control server address into a WebSocket URL
 // the agent can proactively connect to. If no path is provided, it defaults to
-// /agents/register and appends the token as a query parameter.
+// /agents/register. Authentication is added via query parameters: enroll token
+// for first enrollment, device key for subsequent connections, or legacy token.
 func buildControlServerURL(host string, token string) (string, error) {
 	u, err := url.Parse(host)
 	if err != nil {
@@ -74,6 +75,39 @@ func buildControlServerURL(host string, token string) (string, error) {
 	q := u.Query()
 	if q.Get("token") == "" {
 		q.Set("token", token)
+	}
+	u.RawQuery = q.Encode()
+
+	return u.String(), nil
+}
+
+// buildControlServerURLWithAuth builds the WebSocket URL using device key or enrollment token.
+func buildControlServerURLWithAuth(host, deviceKey, enrollToken string) (string, error) {
+	u, err := url.Parse(host)
+	if err != nil {
+		return "", err
+	}
+
+	if u.Scheme == "" {
+		u.Scheme = "ws"
+		u.Host = host
+	}
+	if u.Scheme == "http" {
+		u.Scheme = "ws"
+	}
+	if u.Scheme == "https" {
+		u.Scheme = "wss"
+	}
+
+	if u.Path == "" || u.Path == "/" {
+		u.Path = "/agents/register"
+	}
+
+	q := u.Query()
+	if enrollToken != "" {
+		q.Set("enroll", enrollToken)
+	} else if deviceKey != "" {
+		q.Set("key", deviceKey)
 	}
 	u.RawQuery = q.Encode()
 

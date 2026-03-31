@@ -1,6 +1,8 @@
 node_modules
 server/node_modules
 server/dist
+server/data
+data/
 agent/spectre-agent
 agent/bin
 agent/.gocache
