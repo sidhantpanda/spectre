@@ -107,6 +107,16 @@ The agent does two things:
 
 Both run simultaneously. Terminal I/O is bridged between the WebSocket and a PTY running the user's shell.
 
+### Persistent sessions via tmux
+
+When tmux is installed on the machine, the agent wraps each terminal in a tmux session named `spectre`. This provides:
+
+- Sessions that survive browser disconnects, WebSocket drops, and server restarts
+- Automatic re-attach on reconnect (the current pane content is captured and sent to the browser)
+- Shared terminal view across multiple browser tabs
+
+When tmux is not available, the agent falls back to raw PTY sessions (ephemeral). The `tmuxAvailable` field in `systemInfo` reports whether tmux was detected.
+
 ### WebSocket protocol
 
 Messages are JSON. The agent speaks:
@@ -117,11 +127,11 @@ Messages are JSON. The agent speaks:
 | Agent → Server | `output` | PTY output chunks |
 | Agent → Server | `heartbeat` | Sent every 25s for liveness |
 | Agent → Server | `dockerInfo` | Docker container list |
-| Agent → Server | `systemInfo` | OS, CPU, memory, disk |
+| Agent → Server | `systemInfo` | OS, CPU, memory, disk, tmuxAvailable |
 | Agent → Server | `networkInfo` | IPv4/IPv6 addresses |
 | Server → Agent | `hello` | Handshake response (with device key on enrollment) |
 | Server → Agent | `keystroke` | Terminal input from browser |
-| Server → Agent | `reset` | Start a new shell session |
+| Server → Agent | `reset` | Attach to existing tmux session or start a new shell |
 | Server → Agent | `dockerInfo` | Request container info |
 | Server → Agent | `systemInfo` | Request system info |
 | Server → Agent | `networkInfo` | Request network info |

@@ -60,6 +60,25 @@ Both options can be used at the same time on the same agent.
 
 Click any connected agent in the web UI. Works from any browser on any device.
 
+## Terminal sessions
+
+If **tmux** is installed on the remote machine, Spectre wraps each terminal in a persistent tmux session named `spectre`. This means:
+
+- **Sessions survive browser disconnects** -- close the tab, reopen it, pick up where you left off
+- **Sessions survive network drops** -- if the WebSocket reconnects, the terminal resumes automatically
+- **Sessions survive server restarts** -- the tmux session keeps running independently on the agent
+- **Multiple browser tabs share the same session** -- like `tmux attach` from multiple terminals
+
+If tmux is not installed, terminals fall back to raw PTY sessions (ephemeral, lost on disconnect). Install tmux on your remote machines for the best experience:
+
+```bash
+sudo apt install tmux    # Debian/Ubuntu
+sudo yum install tmux    # RHEL/CentOS
+brew install tmux        # macOS
+```
+
+The web UI shows whether each agent has tmux available in its system info.
+
 ## Local development
 
 ### Option 1: Docker Compose (easiest)

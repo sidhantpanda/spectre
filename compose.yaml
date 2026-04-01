@@ -1,6 +1,8 @@
+# Production Compose file. Uses published images from GHCR.
+# Pin versions after a release, e.g.: image: ghcr.io/sidhantpanda/spectre/server:1.0.0
 services:
   server:
-    image: ghcr.io/sidhantpanda/spectre/server
+    image: ghcr.io/sidhantpanda/spectre/server:${SERVER_VERSION:-latest}
     container_name: spectre-server
     restart: unless-stopped
     ports:
@@ -13,13 +15,13 @@ services:
       - server_data:/data
 
   web-ui:
-    image: ghcr.io/sidhantpanda/spectre/web-ui
+    image: ghcr.io/sidhantpanda/spectre/web-ui:${WEB_UI_VERSION:-latest}
     container_name: spectre-web-ui
     restart: unless-stopped
     ports:
       - "3000:80"
     environment:
-      - SPECTRE_SERVER_HOST=http://localhost:8080
+      - SPECTRE_SERVER_HOST=${SPECTRE_SERVER_HOST:-http://localhost:8080}
 
 volumes:
   server_data:
