@@ -1,75 +1,67 @@
 # Spectre
 
-Remote terminal access from any browser. Access your machines from phones, tablets, or any device with a web browser.
+Remote terminal access from any browser. Open a shell on any of your machines from your phone, tablet, or someone else's computer.
 
 ![Spectre Control UI](public/control-server.png)
 
-## What is Spectre?
+## Setup
 
-Spectre lets you open a terminal on any of your machines from a web browser. It has three parts:
+### Step 1: Start the server
 
-- **Control server** (Node.js) — relays terminal sessions between agents and browsers
-- **Web UI** (React) — browser-based terminal with xterm.js, fleet dashboard
-- **Agent** (Go) — lightweight binary that runs on each remote machine
+On any machine with Docker, create a `compose.yaml`:
 
-Connections work in both directions: the agent can dial the server (for machines behind NAT), or the server can dial the agent (for machines on the local network).
+```yaml
+services:
+  server:
+    image: ghcr.io/sidhantpanda/spectre/server:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - ADMIN_PASSWORD=changeme  # change this
+    volumes:
+      - server_data:/data
 
-## Quick start (production)
+  web-ui:
+    image: ghcr.io/sidhantpanda/spectre/web-ui:latest
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    environment:
+      - SPECTRE_SERVER_HOST=http://localhost:8080
 
-### 1. Deploy the control server
+volumes:
+  server_data:
+```
 
 ```bash
-export ADMIN_PASSWORD=your-secure-password
 docker compose up -d
 ```
 
-Web UI: `http://localhost:3000` | API: `http://localhost:8080`
+Open `http://<server-ip>:3000` and log in with your password.
 
-### 2. Install the agent on a remote machine
+### Step 2: Install the agent on each remote machine
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh | sudo bash
+sudo spectre-agent up --host ws://<server-ip>:8080
 ```
 
-### 3. Connect the agent
+That's it. The machine appears in the web UI. Click it to open a terminal.
 
-**Option A: Agent connects to server (best for NAT/firewalls)**
+> For TLS, put a reverse proxy in front and use `wss://` instead of `ws://`.
 
-1. In the web UI, click **Generate Enrollment Token**
-2. On the remote machine, run the command shown:
+## How it works
 
-```bash
-sudo spectre-agent up --host wss://<server-host> --enroll <token>
+The agent dials out to the server over WebSocket (works through NAT and firewalls). The browser connects to the server which bridges terminal I/O. If **tmux** is installed on the remote machine, sessions persist across browser disconnects and network drops.
+
+```
+Browser ◄──── WebSocket ────► Server ◄──── WebSocket ────► Agent (+ tmux)
 ```
 
-The agent enrolls (one-time), installs as a system service, and reconnects automatically.
+## Persistent sessions
 
-**Option B: Server connects to agent (best for same LAN)**
-
-1. On the remote machine:
-
-```bash
-sudo spectre-agent up --listen :8081 --token mysecret
-```
-
-2. In the web UI, enter `ws://<agent-ip>:8081/ws` and the token in the **Connect to agent** form.
-
-Both options can be used at the same time on the same agent.
-
-### 4. Open a terminal
-
-Click any connected agent in the web UI. Works from any browser on any device.
-
-## Terminal sessions
-
-If **tmux** is installed on the remote machine, Spectre wraps each terminal in a persistent tmux session named `spectre`. This means:
-
-- **Sessions survive browser disconnects** -- close the tab, reopen it, pick up where you left off
-- **Sessions survive network drops** -- if the WebSocket reconnects, the terminal resumes automatically
-- **Sessions survive server restarts** -- the tmux session keeps running independently on the agent
-- **Multiple browser tabs share the same session** -- like `tmux attach` from multiple terminals
-
-If tmux is not installed, terminals fall back to raw PTY sessions (ephemeral, lost on disconnect). Install tmux on your remote machines for the best experience:
+If tmux is installed on the remote machine, Spectre wraps the terminal in a persistent tmux session. Close the tab, reopen it -- you're back where you left off. Multiple tabs share the same session.
 
 ```bash
 sudo apt install tmux    # Debian/Ubuntu
@@ -77,201 +69,121 @@ sudo yum install tmux    # RHEL/CentOS
 brew install tmux        # macOS
 ```
 
-The web UI shows whether each agent has tmux available in its system info.
+Without tmux, sessions are ephemeral (lost on disconnect).
 
-## Local development
-
-### Option 1: Docker Compose (easiest)
-
-Build and run the server and web UI in containers, run the agent natively:
+## Agent commands
 
 ```bash
-# Build and start the control server + web UI
-docker compose -f compose.dev.yaml up -d --build
-
-# Run the agent (connects to server on localhost)
-cd agent
-AGENT_HOST=ws://localhost:8080 ./dev.sh
+spectre-agent status             # check if running
+sudo spectre-agent up --host ... # install as service and start
+sudo spectre-agent down          # stop and remove service
+sudo spectre-agent down --purge  # also delete device data
 ```
 
-Web UI: `http://localhost:3000` | API: `http://localhost:8080`
-
-After making changes, rebuild the containers:
-
-```bash
-# Rebuild everything
-docker compose -f compose.dev.yaml up -d --build
-
-# Rebuild only the server
-docker compose -f compose.dev.yaml up -d --build server
-
-# Rebuild only the web UI
-docker compose -f compose.dev.yaml up -d --build web-ui
-
-# View logs
-docker compose -f compose.dev.yaml logs -f server
-docker compose -f compose.dev.yaml logs -f web-ui
-
-# Tear down
-docker compose -f compose.dev.yaml down
-```
-
-### Option 2: Run everything natively (hot reload)
-
-Prerequisites: Node.js 20+, Go 1.21+
-
-Start each component in a separate terminal:
-
-```bash
-# Terminal 1 — control server (port 8080, hot reload)
-cd server
-npm install
-npm run dev
-
-# Terminal 2 — web UI (port 5173, hot reload, proxies API to 8080)
-cd web-ui
-npm install
-npm run dev
-
-# Terminal 3 — agent (connects to server on localhost, auto-reload)
-cd agent
-AGENT_HOST=ws://localhost:8080 ./dev.sh
-```
-
-Web UI: `http://localhost:5173` (Vite dev server with HMR, proxies `/agents`, `/terminal`, `/auth`, `/devices`, `/version` to port 8080)
-
-The agent `dev.sh` script auto-reloads on Go file changes (uses `watchexec` or `entr` if installed, falls back to polling).
-
-To run the agent without the dev script:
-
-```bash
-cd agent
-go run . --host ws://localhost:8080
-```
-
-### Running tests
-
-```bash
-cd server && npm test      # server unit tests
-cd web-ui && npm test      # web UI tests
-cd agent && go test ./...  # agent tests
-```
-
-### Building
-
-**Server (Docker image):**
-
-```bash
-docker build -t spectre-server ./server
-```
-
-**Web UI (Docker image):**
-
-```bash
-docker build -t spectre-web-ui ./web-ui
-```
-
-**Agent (native binary):**
-
-```bash
-cd agent
-go build -o spectre-agent .
-```
-
-Cross-compile for a different OS/arch:
-
-```bash
-GOOS=linux GOARCH=amd64 go build -o spectre-agent .
-GOOS=linux GOARCH=arm64 go build -o spectre-agent .
-GOOS=darwin GOARCH=arm64 go build -o spectre-agent .
-```
-
-### Dev command reference
-
-| What | Command |
-|------|---------|
-| Start server + UI (Docker) | `docker compose -f compose.dev.yaml up -d --build` |
-| Rebuild server (Docker) | `docker compose -f compose.dev.yaml up -d --build server` |
-| Rebuild web UI (Docker) | `docker compose -f compose.dev.yaml up -d --build web-ui` |
-| Server logs | `docker compose -f compose.dev.yaml logs -f server` |
-| Tear down Docker | `docker compose -f compose.dev.yaml down` |
-| Start server (native) | `cd server && npm run dev` |
-| Start web UI (native) | `cd web-ui && npm run dev` |
-| Start agent (dev) | `cd agent && AGENT_HOST=ws://localhost:8080 ./dev.sh` |
-| Start agent (no reload) | `cd agent && go run . --host ws://localhost:8080` |
-| Build agent binary | `cd agent && go build -o spectre-agent .` |
-| Run all tests | `cd server && npm test && cd ../web-ui && npm test && cd ../agent && go test ./...` |
-
-## Agent management
-
-```bash
-spectre-agent status          # show running state, device ID, enrollment
-sudo spectre-agent up ...     # install and start as system service
-sudo spectre-agent down       # stop and remove service (keeps device data)
-sudo spectre-agent down --purge  # stop, remove service, delete all data
-```
-
-Full uninstall (binary + service + data):
+Uninstall everything:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/uninstall-agent.sh | sudo bash
 ```
 
-## Production deployment with TLS
+## Server connects to agent (alternative)
 
-Put a reverse proxy (nginx, Traefik, cloud LB) in front of the server and web UI to terminate TLS. The web UI container already runs nginx.
-
-Forward HTTPS to server:8080 and web-ui:3000. Agents connect with `wss://`:
+If the agent is directly reachable (same LAN, no NAT), the server can dial the agent instead:
 
 ```bash
-sudo spectre-agent up --host wss://spectre.example.com --enroll <token>
+sudo spectre-agent up --listen :8081 --token mysecret
 ```
+
+Then in the web UI, use the **Connect to agent** form with `ws://<agent-ip>:8081/ws` and the token.
 
 ## Configuration
 
-### Server environment variables
+### Server
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT` | `8080` | HTTP server port |
-| `ADMIN_PASSWORD` | *(empty)* | Web UI login password. If empty, auth is disabled |
-| `DATA_DIR` | `./data` | Persistent device store directory |
-| `AGENT_AUTH_TOKEN` | `changeme` | Shared token for legacy agent auth |
+| `ADMIN_PASSWORD` | *(empty)* | Web UI password. Empty = no auth |
+| `PORT` | `8080` | API port |
+| `DATA_DIR` | `./data` | Persistent store |
 | `CORS_ORIGIN` | `*` | Allowed CORS origins |
 
-### Agent flags
+### Agent
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--host` | | Control server URL (e.g. `wss://server.example.com`) |
-| `--enroll` | | One-time enrollment token |
-| `--listen` | `:8081` | Local API server address |
+| `--host` | | Server URL (`ws://` or `wss://`) |
+| `--listen` | `:8081` | Local API address |
 | `--token` | `changeme` | Token for server-to-agent connections |
+| `--enroll` | | One-time enrollment token |
+
+## Releases
+
+Pushing a git tag triggers automated releases:
+
+| Tag pattern | What happens |
+|-------------|-------------|
+| `server-v*` | Builds + pushes Docker image to `ghcr.io/sidhantpanda/spectre/server` |
+| `web-ui-v*` | Builds + pushes Docker image to `ghcr.io/sidhantpanda/spectre/web-ui` |
+| `agent-v*` | Cross-compiles agent binaries (linux/darwin, amd64/arm64) and publishes to GitHub Releases |
+
+Manual agent release: trigger the "Release Agent" workflow from the Actions tab.
+
+The install script (`install-agent.sh`) automatically downloads the latest `agent-v*` release.
+
+## Local development
+
+### Docker Compose (easiest)
+
+```bash
+docker compose -f compose.dev.yaml up -d --build    # server + web UI
+cd agent && AGENT_HOST=ws://localhost:8080 ./dev.sh  # agent with auto-reload
+```
+
+Web UI: `http://localhost:3000` | API: `http://localhost:8080`
+
+```bash
+docker compose -f compose.dev.yaml up -d --build server   # rebuild server only
+docker compose -f compose.dev.yaml up -d --build web-ui   # rebuild web UI only
+docker compose -f compose.dev.yaml logs -f server          # view logs
+docker compose -f compose.dev.yaml down                    # tear down
+```
+
+### Native (hot reload)
+
+```bash
+cd server  && npm install && npm run dev           # port 8080
+cd web-ui  && npm install && npm run dev           # port 5173 (proxies to 8080)
+cd agent   && AGENT_HOST=ws://localhost:8080 ./dev.sh
+```
+
+### Build agent binary
+
+```bash
+cd agent && go build -o spectre-agent .
+GOOS=linux GOARCH=arm64 go build -o spectre-agent .  # cross-compile
+```
+
+### Tests
+
+```bash
+cd server  && npm test
+cd web-ui  && npm test
+cd agent   && go test ./...
+```
 
 ## Architecture
 
 ```
                                  ┌─────────────────┐
                                  │  Control Server  │
-                                 │   (Node.js)      │
-┌──────────┐    /terminal WS     │                  │
+┌──────────┐    /terminal WS     │   (Node.js)      │
 │  Browser  │ ◄────────────────► │                  │
-│ (xterm.js)│                    │                  │
-└──────────┘                     └───────┬──┬───────┘
-                                         │  │
+│ (xterm.js)│                    └───────┬──┬───────┘
+└──────────┘                             │  │
                               ┌──────────┘  └──────────┐
-                              │ inbound                 │ outbound
-                              │ (agent dials server)    │ (server dials agent)
-                              ▼                         ▼
+                              ▼ inbound                 ▼ outbound
                       ┌──────────────┐          ┌──────────────┐
                       │   Agent A    │          │   Agent B    │
                       │ behind NAT   │          │ on local LAN │
-                      │  --host ...  │          │ --listen 8081│
                       └──────────────┘          └──────────────┘
 ```
-
-**Inbound:** Agent dials `wss://server/agents/register` — works through NAT/firewalls. Uses enrollment tokens, then per-device keys.
-
-**Outbound:** Server dials `ws://agent:8081/ws` — for directly reachable machines. Uses shared token auth.
-
-Both directions can be active on the same agent simultaneously.
