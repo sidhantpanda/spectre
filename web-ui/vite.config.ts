@@ -17,16 +17,20 @@ export default defineConfig({
         ws: true,
         secure: false,
       },
-      "/agents/events": {
+      "/terminal": {
         target: CONTROL_SERVER_TARGET,
         changeOrigin: true,
         ws: true,
         secure: false,
       },
-      "/terminal": {
+      "/auth": {
         target: CONTROL_SERVER_TARGET,
         changeOrigin: true,
-        ws: true,
+        secure: false,
+      },
+      "/devices": {
+        target: CONTROL_SERVER_TARGET,
+        changeOrigin: true,
         secure: false,
       },
       "/version": {

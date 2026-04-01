@@ -27,6 +27,7 @@ export type SystemInfo = {
   memoryBytes: number;
   diskTotalBytes: number;
   diskFreeBytes: number;
+  tmuxAvailable?: boolean;
 };
 
 export type NetworkInfo = {

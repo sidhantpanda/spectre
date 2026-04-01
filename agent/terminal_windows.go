@@ -10,7 +10,15 @@ import (
 	"github.com/creack/pty"
 )
 
-func startShell() *os.File {
+func isTmuxAvailable() bool {
+	return false
+}
+
+func killTmuxSession(_ string) {}
+
+func captureTmuxPane(_ string) string { return "" }
+
+func startShell(_ string) *os.File {
 	shell := os.Getenv("COMSPEC")
 	if shell == "" {
 		shell = "cmd.exe"

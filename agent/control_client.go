@@ -13,6 +13,7 @@ import (
 // connectToControlServer dials the control server and establishes the shell bridge.
 // It supports three auth modes: enrollment token (first time), stored device key
 // (subsequent connections), or legacy shared token (backward compat).
+// The ptyManager persists across reconnections so tmux sessions survive WebSocket drops.
 func connectToControlServer(host, legacyToken, enrollToken string, deviceInfo *DeviceInfo, fingerprint map[string]any) {
 	deviceKey := deviceInfo.DeviceKey
 
@@ -30,6 +31,8 @@ func connectToControlServer(host, legacyToken, enrollToken string, deviceInfo *D
 		log.Printf("no device key or enrollment token; using legacy token auth")
 	}
 
+	sessions := newPtyManager()
+
 	backoff := time.Second
 	for {
 		var wsURL string
@@ -45,7 +48,7 @@ func connectToControlServer(host, legacyToken, enrollToken string, deviceInfo *D
 			return
 		}
 
-		conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		rawConn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 		if err != nil {
 			var details string
 			if resp != nil {
@@ -72,25 +75,25 @@ func connectToControlServer(host, legacyToken, enrollToken string, deviceInfo *D
 			AgentVersion: getAgentVersion(),
 			Fingerprint:  fingerprint,
 		}
-		if err := conn.WriteJSON(hello); err != nil {
+		if err := rawConn.WriteJSON(hello); err != nil {
 			log.Printf("failed to send handshake to control server: %v", err)
-			conn.Close()
+			rawConn.Close()
 			backoff = nextBackoff(backoff)
 			time.Sleep(backoff)
 			continue
 		}
 
 		var ack ControlMessage
-		if err := conn.ReadJSON(&ack); err != nil {
+		if err := rawConn.ReadJSON(&ack); err != nil {
 			log.Printf("failed to read control server ack: %v", err)
-			conn.Close()
+			rawConn.Close()
 			backoff = nextBackoff(backoff)
 			time.Sleep(backoff)
 			continue
 		}
 		if ack.Type != "hello" {
 			log.Printf("unexpected handshake response from control server: %v", ack.Type)
-			conn.Close()
+			rawConn.Close()
 			backoff = nextBackoff(backoff)
 			time.Sleep(backoff)
 			continue
@@ -110,20 +113,31 @@ func connectToControlServer(host, legacyToken, enrollToken string, deviceInfo *D
 
 		backoff = time.Second
 
-		sessions := newPtyManager()
-		errCh := make(chan error, 1)
+		conn := newSafeConn(rawConn)
+		errCh := make(chan error, 3)
 		startPTY := func(session *ptySession) {
 			go readFromPTY(conn, session, errCh)
 		}
-		sessions.reset("default")
+
+		active := sessions.activeSessions()
+		if len(active) > 0 {
+			log.Printf("re-attaching %d existing session(s)", len(active))
+			for _, s := range active {
+				s.reset()
+				startPTY(s)
+			}
+		} else {
+			session, _ := sessions.reset("spectre")
+			startPTY(session)
+		}
+
 		go readFromControl(conn, sessions, errCh, startPTY)
 		go sendHeartbeats(conn, errCh)
 
 		if err := <-errCh; err != nil {
 			log.Printf("control server connection closed: %v", err)
 		}
-		sessions.closeAll()
-		conn.Close()
+		conn.close()
 
 		backoff = nextBackoff(backoff)
 		time.Sleep(backoff)

@@ -18,6 +18,7 @@ type SystemInfo struct {
 	MemoryBytes    uint64 `json:"memoryBytes"`
 	DiskTotalBytes uint64 `json:"diskTotalBytes"`
 	DiskFreeBytes  uint64 `json:"diskFreeBytes"`
+	TmuxAvailable  bool   `json:"tmuxAvailable"`
 }
 
 type NetworkInfo struct {

@@ -1,38 +1,97 @@
 # Spectre Control Server
 
-A Node.js + TypeScript control plane that dials into Spectre agents, keeps track of connection status, and provides REST endpoints for sending commands.
+Node.js + TypeScript control plane that relays terminal sessions between browser clients and remote agents.
 
-## Features
-- Express HTTP server that connects outward to agent WebSocket endpoints using `ws`.
-- Token-based authentication shared with agents during handshake.
-- Tracks connecting/connected/disconnected agents and exposes a `/agents` listing.
-- `/agents/connect` endpoint that instructs the control server to dial a remote agent address.
-- `/agents/:id/command` endpoint to push keystrokes or commands to an agent's pseudo-terminal session.
-- In-memory registry for demo purposes; swap with persistent storage or a message bus for production.
-- Accepts inbound agent registrations over WebSocket at `/agents/register` so agents can initiate control on their own.
+## Quick start
 
-## Getting Started
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-2. Start the development server:
-   ```bash
-   npm run dev
-   ```
-3. Set the `AGENT_AUTH_TOKEN` environment variable to match the token configured on agents.
+```bash
+npm install
+npm run dev
+```
+
+The server starts on port 8080. Set `ADMIN_PASSWORD` to enable web UI authentication:
+
+```bash
+ADMIN_PASSWORD=secret npm run dev
+```
 
 ## API
-- `GET /agents` — Lists known agents with connection status and fingerprint metadata.
-- `POST /agents/connect` — Body: `{ "address": "ws://<agent-ip>:8081/ws", "token": "changeme" }` to initiate a connection.
-- `POST /agents/:id/command` — Pushes keystrokes/command text to the agent. Body: `{ "data": "ls -la\n" }`.
-- `WS /agents/register` — Agents can connect directly using `ws://<control-host>:8080/agents/register?token=<AUTH_TOKEN>` with a `hello` handshake payload.
 
-## Project Structure
-- `src/server.ts` — Express setup, outbound WebSocket handling, and in-memory agent registry.
-- `src/types.ts` — Shared message/agent types used by the server.
+### Authentication
 
-## Notes
-- This implementation is intentionally simple and keeps state in memory. For a real deployment, plug in durable storage and a permission model for operator sessions.
-- The server currently trusts a single shared token. Replace with JWT or mTLS for stronger identity.
-- The server logs the `-host` value agents should provide to initiate an inbound connection once it starts listening.
+| Endpoint | Description |
+|----------|-------------|
+| `GET /auth/status` | Returns `{ authEnabled: true/false }` |
+| `POST /auth/login` | Body: `{ "password": "..." }` → `{ "token": "..." }` |
+
+When `ADMIN_PASSWORD` is set, all endpoints below require `Authorization: Bearer <token>`.
+
+### Agents
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /agents` | List all agents with status, system info, Docker containers |
+| `POST /agents/connect` | Server dials an agent. Body: `{ "address": "ws://ip:8081/ws", "token": "..." }` |
+| `POST /agents/:id/command` | Push keystrokes. Body: `{ "data": "ls\n" }` |
+| `POST /agents/refresh-docker` | Re-fetch Docker info from all agents |
+| `POST /agents/refresh-system` | Re-fetch system info from all agents |
+| `POST /agents/refresh-network` | Re-fetch network info from all agents |
+
+### Devices
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /devices/enroll` | Create enrollment token → `{ "token": "...", "expiresAt": ... }` |
+| `GET /devices` | List enrolled devices |
+
+### WebSocket endpoints
+
+| Path | Auth | Description |
+|------|------|-------------|
+| `WS /terminal?id=<agentId>` | UI session token | Browser terminal I/O |
+| `WS /agents/events` | UI session token | Live agent status stream |
+| `WS /agents/register` | Device key or enrollment token | Agent registration |
+
+## Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `8080` | HTTP server port |
+| `ADMIN_PASSWORD` | *(empty)* | Web UI password. Empty = auth disabled |
+| `DATA_DIR` | `./data` | Device store location (JSON file) |
+| `AGENT_AUTH_TOKEN` | `changeme` | Legacy shared token |
+| `CORS_ORIGIN` | `*` | Allowed CORS origins |
+
+## Project structure
+
+```
+src/
+  server.ts        — HTTP server bootstrap, device store init
+  app.ts           — Express routes, auth middleware
+  websockets.ts    — WebSocket upgrade routing, terminal/agent/events handlers
+  agentRegistry.ts — In-memory agent tracking, outbound connections, stale sweep
+  deviceStore.ts   — JSON-file persistent store for devices and enrollment tokens
+  auth.ts          — Session-based auth (login, token validation, middleware)
+  config.ts        — Environment variable config
+  types.ts         — Shared TypeScript types
+  version.ts       — Server version
+  utils/
+    net.ts         — Client address extraction
+    output.ts      — Terminal output summarization
+```
+
+## Scripts
+
+```bash
+npm run dev    # Start with hot reload (ts-node-dev)
+npm run build  # Compile TypeScript to dist/
+npm start      # Run compiled output
+npm test       # Run tests (vitest)
+```
+
+## Docker
+
+```bash
+docker build -t spectre-server .
+docker run -p 8080:8080 -e ADMIN_PASSWORD=secret spectre-server
+```

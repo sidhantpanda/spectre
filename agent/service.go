@@ -150,12 +150,12 @@ func runOneShot(exe string, args []string) error {
 }
 
 func buildExecArgs(listen, token, host, enroll string) []string {
-	args := []string{fmt.Sprintf("-listen=%s", listen), fmt.Sprintf("-token=%s", token)}
+	args := []string{fmt.Sprintf("--listen=%s", listen), fmt.Sprintf("--token=%s", token)}
 	if host != "" {
-		args = append(args, fmt.Sprintf("-host=%s", host))
+		args = append(args, fmt.Sprintf("--host=%s", host))
 	}
 	if enroll != "" {
-		args = append(args, fmt.Sprintf("-enroll=%s", enroll))
+		args = append(args, fmt.Sprintf("--enroll=%s", enroll))
 	}
 	return args
 }

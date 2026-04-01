@@ -20,6 +20,7 @@ func collectSystemInfo() (SystemInfo, error) {
 	info.CPU = detectCPUName()
 	info.MemoryBytes = detectMemoryBytes()
 	info.DiskTotalBytes, info.DiskFreeBytes = detectDiskUsage()
+	info.TmuxAvailable = isTmuxAvailable()
 
 	return info, nil
 }

@@ -35,11 +35,11 @@ function broadcastToUi(agentId: string, payload: { type: string; [key: string]: 
   const targetSession = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
 
   if (targetSession) {
-    const socket = clients.get(targetSession);
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(payload));
+    const exactSocket = clients.get(targetSession);
+    if (exactSocket && exactSocket.readyState === WebSocket.OPEN) {
+      exactSocket.send(JSON.stringify(payload));
+      return;
     }
-    return;
   }
 
   for (const socket of clients.values()) {
@@ -72,12 +72,14 @@ function handleUiConnection(uiWss: WebSocketServer) {
       return;
     }
 
-    const sessions = uiClients.get(agentId) ?? new Map<string, WebSocket>();
-    const sessionId = uuid();
-    sessions.set(sessionId, socket);
-    uiClients.set(agentId, sessions);
+    const viewerId = uuid();
+    const termSessionId = "spectre";
 
-    console.log(`[ui terminal] connected for agent ${agentId} (viewers=${sessions.size})`);
+    const viewers = uiClients.get(agentId) ?? new Map<string, WebSocket>();
+    viewers.set(viewerId, socket);
+    uiClients.set(agentId, viewers);
+
+    console.log(`[ui terminal] viewer ${viewerId} connected for agent ${agentId} (viewers=${viewers.size})`);
 
     socket.send(
       JSON.stringify({
@@ -87,13 +89,13 @@ function handleUiConnection(uiWss: WebSocketServer) {
         deviceId: entry.record.deviceId ?? entry.record.remoteAgentId,
         remoteAgentId: entry.record.remoteAgentId,
         agentId: entry.record.id,
-        connectionId: sessionId,
-        sessionId,
+        connectionId: viewerId,
+        sessionId: termSessionId,
       }),
     );
 
     try {
-      pushToAgent(agentId, { type: "reset", sessionId });
+      pushToAgent(agentId, { type: "reset", sessionId: termSessionId });
     } catch (err) {
       socket.send(JSON.stringify({ type: "error", message: (err as Error).message }));
     }
@@ -102,21 +104,21 @@ function handleUiConnection(uiWss: WebSocketServer) {
       try {
         const parsed = JSON.parse(data.toString()) as { type?: string; data?: string };
         if (parsed.type !== "input" || typeof parsed.data !== "string") return;
-        pushToAgent(agentId, { type: "keystroke", data: parsed.data, sessionId });
+        pushToAgent(agentId, { type: "keystroke", data: parsed.data, sessionId: termSessionId });
       } catch (err) {
         socket.send(JSON.stringify({ type: "error", message: (err as Error).message }));
       }
     });
 
     socket.on("close", () => {
-      const currentSessions = uiClients.get(agentId);
-      if (currentSessions) {
-        currentSessions.delete(sessionId);
-        if (currentSessions.size === 0) {
+      const currentViewers = uiClients.get(agentId);
+      if (currentViewers) {
+        currentViewers.delete(viewerId);
+        if (currentViewers.size === 0) {
           uiClients.delete(agentId);
-          console.log(`[ui terminal] disconnected for agent ${agentId} (viewers=0)`);
+          console.log(`[ui terminal] viewer ${viewerId} disconnected for agent ${agentId} (viewers=0)`);
         } else {
-          console.log(`[ui terminal] disconnected for agent ${agentId} (viewers=${currentSessions.size})`);
+          console.log(`[ui terminal] viewer ${viewerId} disconnected for agent ${agentId} (viewers=${currentViewers.size})`);
         }
       }
     });

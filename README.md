@@ -2,15 +2,19 @@
 
 Remote terminal access from any browser. Access your machines from phones, tablets, or any device with a web browser.
 
-- **server/** — Node.js + TypeScript control plane built with Express and `ws` that relays terminal sessions between agents and browsers.
-- **web-ui/** — Vite + React + TypeScript UI with xterm.js for interactive terminal access and fleet management.
-- **agent/** — Go-based agent that runs on remote machines. Connects to the control server and exposes a PTY-backed terminal.
-
-Agents authenticate using per-device keys issued during enrollment. The web UI is protected by an admin password. TLS should be terminated at your reverse proxy (nginx, etc.) in front of the server.
-
 ![Spectre Control UI](public/control-server.png)
 
-## Quick start
+## What is Spectre?
+
+Spectre lets you open a terminal on any of your machines from a web browser. It has three parts:
+
+- **Control server** (Node.js) — relays terminal sessions between agents and browsers
+- **Web UI** (React) — browser-based terminal with xterm.js, fleet dashboard
+- **Agent** (Go) — lightweight binary that runs on each remote machine
+
+Connections work in both directions: the agent can dial the server (for machines behind NAT), or the server can dial the agent (for machines on the local network).
+
+## Quick start (production)
 
 ### 1. Deploy the control server
 
@@ -19,7 +23,7 @@ export ADMIN_PASSWORD=your-secure-password
 docker compose up -d
 ```
 
-The web UI is at `http://localhost:3000`, the API at `http://localhost:8080`.
+Web UI: `http://localhost:3000` | API: `http://localhost:8080`
 
 ### 2. Install the agent on a remote machine
 
@@ -27,109 +31,182 @@ The web UI is at `http://localhost:3000`, the API at `http://localhost:8080`.
 curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh | sudo bash
 ```
 
-This downloads the latest release binary and installs it to `/usr/local/bin/spectre-agent`.
-
-If you cannot use sudo, install to a writable directory:
-
-```bash
-BIN_DIR="$HOME/.local/bin" curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh | bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile && source ~/.profile
-```
-
 ### 3. Connect the agent
 
-There are two ways to connect an agent. You can use either or both at the same time.
+**Option A: Agent connects to server (best for NAT/firewalls)**
 
-#### Option A: Agent connects to server (inbound)
-
-Best for machines behind NAT or firewalls. The agent dials out to the control server.
-
-1. In the web UI, click **Generate Enrollment Token** to get a one-time command
-2. On the remote machine:
+1. In the web UI, click **Generate Enrollment Token**
+2. On the remote machine, run the command shown:
 
 ```bash
 sudo spectre-agent up --host wss://<server-host> --enroll <token>
 ```
 
-This enrolls the agent (exchanges the token for a permanent device key), installs it as a system service, and starts it. The enrollment token is single-use and expires in 15 minutes. After enrollment, the agent reconnects automatically using the stored device key.
+The agent enrolls (one-time), installs as a system service, and reconnects automatically.
 
-#### Option B: Server connects to agent (outbound)
+**Option B: Server connects to agent (best for same LAN)**
 
-Best when the agent machine is directly reachable on the network (e.g., same LAN, no NAT).
-
-1. On the remote machine, start the agent:
+1. On the remote machine:
 
 ```bash
 sudo spectre-agent up --listen :8081 --token mysecret
 ```
 
-2. In the web UI, use the **Connect to agent** form. Enter the agent's address (`ws://<agent-ip>:8081/ws`) and the matching token.
+2. In the web UI, enter `ws://<agent-ip>:8081/ws` and the token in the **Connect to agent** form.
 
-The control server dials the agent and establishes the connection. The server will automatically reconnect if the connection drops.
+Both options can be used at the same time on the same agent.
 
-#### Using both at the same time
+### 4. Open a terminal
 
-The agent always starts a local WebSocket server (for outbound connections from the control server), regardless of whether `--host` is specified. This means you can enroll an agent with the server AND connect to it directly:
+Click any connected agent in the web UI. Works from any browser on any device.
+
+## Local development
+
+### Option 1: Docker Compose (easiest)
+
+Build and run the server and web UI in containers, run the agent natively:
 
 ```bash
-sudo spectre-agent up --host wss://server.example.com --enroll <token> --listen :8081 --token mysecret
+# Build and start the control server + web UI
+docker compose -f compose.dev.yaml up -d --build
+
+# Run the agent (connects to server on localhost)
+cd agent
+AGENT_HOST=ws://localhost:8080 ./dev.sh
 ```
 
-### 4. Access terminals
+Web UI: `http://localhost:3000` | API: `http://localhost:8080`
 
-Click any connected agent in the web UI to open a terminal. Works from any browser on any device.
+After making changes, rebuild the containers:
+
+```bash
+# Rebuild everything
+docker compose -f compose.dev.yaml up -d --build
+
+# Rebuild only the server
+docker compose -f compose.dev.yaml up -d --build server
+
+# Rebuild only the web UI
+docker compose -f compose.dev.yaml up -d --build web-ui
+
+# View logs
+docker compose -f compose.dev.yaml logs -f server
+docker compose -f compose.dev.yaml logs -f web-ui
+
+# Tear down
+docker compose -f compose.dev.yaml down
+```
+
+### Option 2: Run everything natively (hot reload)
+
+Prerequisites: Node.js 20+, Go 1.21+
+
+Start each component in a separate terminal:
+
+```bash
+# Terminal 1 — control server (port 8080, hot reload)
+cd server
+npm install
+npm run dev
+
+# Terminal 2 — web UI (port 5173, hot reload, proxies API to 8080)
+cd web-ui
+npm install
+npm run dev
+
+# Terminal 3 — agent (connects to server on localhost, auto-reload)
+cd agent
+AGENT_HOST=ws://localhost:8080 ./dev.sh
+```
+
+Web UI: `http://localhost:5173` (Vite dev server with HMR, proxies `/agents`, `/terminal`, `/auth`, `/devices`, `/version` to port 8080)
+
+The agent `dev.sh` script auto-reloads on Go file changes (uses `watchexec` or `entr` if installed, falls back to polling).
+
+To run the agent without the dev script:
+
+```bash
+cd agent
+go run . --host ws://localhost:8080
+```
+
+### Running tests
+
+```bash
+cd server && npm test      # server unit tests
+cd web-ui && npm test      # web UI tests
+cd agent && go test ./...  # agent tests
+```
+
+### Building
+
+**Server (Docker image):**
+
+```bash
+docker build -t spectre-server ./server
+```
+
+**Web UI (Docker image):**
+
+```bash
+docker build -t spectre-web-ui ./web-ui
+```
+
+**Agent (native binary):**
+
+```bash
+cd agent
+go build -o spectre-agent .
+```
+
+Cross-compile for a different OS/arch:
+
+```bash
+GOOS=linux GOARCH=amd64 go build -o spectre-agent .
+GOOS=linux GOARCH=arm64 go build -o spectre-agent .
+GOOS=darwin GOARCH=arm64 go build -o spectre-agent .
+```
+
+### Dev command reference
+
+| What | Command |
+|------|---------|
+| Start server + UI (Docker) | `docker compose -f compose.dev.yaml up -d --build` |
+| Rebuild server (Docker) | `docker compose -f compose.dev.yaml up -d --build server` |
+| Rebuild web UI (Docker) | `docker compose -f compose.dev.yaml up -d --build web-ui` |
+| Server logs | `docker compose -f compose.dev.yaml logs -f server` |
+| Tear down Docker | `docker compose -f compose.dev.yaml down` |
+| Start server (native) | `cd server && npm run dev` |
+| Start web UI (native) | `cd web-ui && npm run dev` |
+| Start agent (dev) | `cd agent && AGENT_HOST=ws://localhost:8080 ./dev.sh` |
+| Start agent (no reload) | `cd agent && go run . --host ws://localhost:8080` |
+| Build agent binary | `cd agent && go build -o spectre-agent .` |
+| Run all tests | `cd server && npm test && cd ../web-ui && npm test && cd ../agent && go test ./...` |
 
 ## Agent management
 
-### Check status
-
 ```bash
-spectre-agent status
+spectre-agent status          # show running state, device ID, enrollment
+sudo spectre-agent up ...     # install and start as system service
+sudo spectre-agent down       # stop and remove service (keeps device data)
+sudo spectre-agent down --purge  # stop, remove service, delete all data
 ```
 
-Shows whether the agent is running, its PID, device ID, enrollment state, and service status.
-
-### Stop the agent
-
-```bash
-sudo spectre-agent down
-```
-
-Stops the service and removes the service definition. Device data (device key, enrollment state) is preserved so you can re-enroll later.
-
-To also remove all device data:
-
-```bash
-sudo spectre-agent down --purge
-```
-
-### Uninstall completely
+Full uninstall (binary + service + data):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/uninstall-agent.sh | sudo bash
 ```
 
-This stops the service, removes the binary, and cleans up all data directories (`/var/lib/spectre-agent`, `~/.spectre-agent`, lock files).
-
-### Run in foreground (debugging)
-
-```bash
-spectre-agent --host wss://<server-host>
-```
-
-Runs the agent directly in the terminal without installing a service. Useful for debugging. Press Ctrl+C to stop.
-
 ## Production deployment with TLS
 
-Terminate TLS at a reverse proxy (nginx, Traefik, cloud load balancer, etc.) in front of the control server and web UI. The web UI container already runs nginx internally.
+Put a reverse proxy (nginx, Traefik, cloud LB) in front of the server and web UI to terminate TLS. The web UI container already runs nginx.
 
-Configure your proxy to forward HTTPS traffic to the server on port 8080 and the web UI on port 3000. Agents connect using `wss://`:
+Forward HTTPS to server:8080 and web-ui:3000. Agents connect with `wss://`:
 
 ```bash
 sudo spectre-agent up --host wss://spectre.example.com --enroll <token>
 ```
-
-The agent warns if you use `ws://` instead of `wss://`.
 
 ## Configuration
 
@@ -138,51 +215,19 @@ The agent warns if you use `ws://` instead of `wss://`.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8080` | HTTP server port |
-| `ADMIN_PASSWORD` | *(none)* | Password for web UI login. If empty, auth is disabled. |
-| `DATA_DIR` | `./data` | Directory for persistent device store |
-| `AGENT_AUTH_TOKEN` | `changeme` | Legacy shared token for agent auth |
-| `CORS_ORIGIN` | `*` | Allowed CORS origins (comma-separated) |
-
-### Agent commands
-
-| Command | Description |
-|---------|-------------|
-| `spectre-agent` | Run the agent in foreground |
-| `spectre-agent up` | Install and start as a system service |
-| `spectre-agent down` | Stop and remove the service |
-| `spectre-agent down --purge` | Stop, remove service, and delete all device data |
-| `spectre-agent status` | Show agent status and connection info |
+| `ADMIN_PASSWORD` | *(empty)* | Web UI login password. If empty, auth is disabled |
+| `DATA_DIR` | `./data` | Persistent device store directory |
+| `AGENT_AUTH_TOKEN` | `changeme` | Shared token for legacy agent auth |
+| `CORS_ORIGIN` | `*` | Allowed CORS origins |
 
 ### Agent flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--host` | *(none)* | Control server URL to register with |
-| `--enroll` | *(none)* | One-time enrollment token (first run only) |
-| `--listen` | `:8081` | Address for the local API server |
-| `--token` | `changeme` | Token for outbound connections from the control server |
-
-## Development
-
-1. Start the control server:
-
-```bash
-cd server && npm install && npm run dev
-```
-
-2. Start the web UI:
-
-```bash
-cd web-ui && npm install && npm run dev
-```
-
-3. Run the agent:
-
-```bash
-cd agent && AGENT_HOST=ws://localhost:8080 ./dev.sh
-```
-
-Only one agent instance runs per machine; starting another prints the active PID and connection URL.
+| `--host` | | Control server URL (e.g. `wss://server.example.com`) |
+| `--enroll` | | One-time enrollment token |
+| `--listen` | `:8081` | Local API server address |
+| `--token` | `changeme` | Token for server-to-agent connections |
 
 ## Architecture
 
@@ -206,8 +251,8 @@ Only one agent instance runs per machine; starting another prints the active PID
                       └──────────────┘          └──────────────┘
 ```
 
-**Inbound:** Agent dials `wss://server/agents/register` — works through NAT/firewalls. Uses enrollment tokens for initial setup, then per-device keys.
+**Inbound:** Agent dials `wss://server/agents/register` — works through NAT/firewalls. Uses enrollment tokens, then per-device keys.
 
-**Outbound:** Server dials `ws://agent:8081/ws` — for directly reachable machines. Uses shared token authentication.
+**Outbound:** Server dials `ws://agent:8081/ws` — for directly reachable machines. Uses shared token auth.
 
 Both directions can be active on the same agent simultaneously.

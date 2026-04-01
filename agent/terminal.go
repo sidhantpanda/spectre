@@ -11,6 +11,31 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// safeConn wraps a websocket.Conn with a mutex to prevent concurrent writes.
+// gorilla/websocket does not support concurrent writers.
+type safeConn struct {
+	mu   sync.Mutex
+	conn *websocket.Conn
+}
+
+func newSafeConn(conn *websocket.Conn) *safeConn {
+	return &safeConn{conn: conn}
+}
+
+func (c *safeConn) writeJSON(v interface{}) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.conn.WriteJSON(v)
+}
+
+func (c *safeConn) readJSON(v interface{}) error {
+	return c.conn.ReadJSON(v)
+}
+
+func (c *safeConn) close() error {
+	return c.conn.Close()
+}
+
 type ptySession struct {
 	mu        sync.RWMutex
 	ptm       *os.File
@@ -38,14 +63,14 @@ func (s *ptySession) stopChan() <-chan struct{} {
 	return s.stop
 }
 
-// reset starts a fresh shell, stops the current PTY reader, and returns the new PTY.
+// reset attaches to an existing tmux session (if available) or starts a fresh
+// shell. Stops the current PTY reader and replaces the master FD.
 func (s *ptySession) reset() *os.File {
 	s.mu.Lock()
 	oldStop := s.stop
 	old := s.ptm
-	// replace stop channel so PTY reader can exit quietly
 	s.stop = make(chan struct{})
-	s.ptm = startShell()
+	s.ptm = startShell(s.sessionID)
 	s.mu.Unlock()
 
 	close(oldStop)
@@ -70,17 +95,21 @@ func (m *ptyManager) get(sessionID string) *ptySession {
 	return m.sessions[sessionID]
 }
 
-func (m *ptyManager) reset(sessionID string) *ptySession {
+func (m *ptyManager) reset(sessionID string) (*ptySession, bool) {
 	m.mu.Lock()
 	session, ok := m.sessions[sessionID]
 	if !ok {
 		session = newPtySession(sessionID)
 		m.sessions[sessionID] = session
 	}
+	alreadyRunning := ok && session.current() != nil
 	m.mu.Unlock()
 
+	if alreadyRunning {
+		return session, false
+	}
 	session.reset()
-	return session
+	return session, true
 }
 
 func (m *ptyManager) closeAll() {
@@ -108,19 +137,32 @@ func (s *ptySession) close() {
 		_ = s.ptm.Close()
 		s.ptm = nil
 	}
+	killTmuxSession(s.sessionID)
 }
 
-func readFromControl(conn *websocket.Conn, sessions *ptyManager, errCh chan<- error, restartPTY func(*ptySession)) {
+func (m *ptyManager) activeSessions() []*ptySession {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]*ptySession, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		if s.current() != nil {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+func readFromControl(conn *safeConn, sessions *ptyManager, errCh chan<- error, restartPTY func(*ptySession)) {
 	for {
 		var msg ControlMessage
-		if err := conn.ReadJSON(&msg); err != nil {
+		if err := conn.readJSON(&msg); err != nil {
 			errCh <- err
 			return
 		}
 
 		sessionID := msg.SessionID
 		if sessionID == "" {
-			sessionID = "default"
+			sessionID = "spectre"
 		}
 
 		switch msg.Type {
@@ -140,8 +182,22 @@ func readFromControl(conn *websocket.Conn, sessions *ptyManager, errCh chan<- er
 				return
 			}
 		case "reset":
-			session := sessions.reset(sessionID)
-			restartPTY(session)
+			session, created := sessions.reset(sessionID)
+			if created {
+				restartPTY(session)
+			} else {
+				content := captureTmuxPane(sessionID)
+				if content != "" {
+					if err := conn.writeJSON(AgentMessage{Type: "output", Data: content, SessionID: sessionID}); err != nil {
+						errCh <- err
+						return
+					}
+				}
+				ptm := session.current()
+				if ptm != nil {
+					_, _ = ptm.Write([]byte{0x0c}) // Ctrl+L: redraw the terminal
+				}
+			}
 		case "dockerInfo":
 			containers, err := listDockerContainers()
 			payload := AgentMessage{
@@ -151,7 +207,7 @@ func readFromControl(conn *websocket.Conn, sessions *ptyManager, errCh chan<- er
 			if err != nil {
 				payload.Error = err.Error()
 			}
-			if err := conn.WriteJSON(payload); err != nil {
+			if err := conn.writeJSON(payload); err != nil {
 				errCh <- err
 				return
 			}
@@ -164,7 +220,7 @@ func readFromControl(conn *websocket.Conn, sessions *ptyManager, errCh chan<- er
 			if err != nil {
 				payload.Error = err.Error()
 			}
-			if err := conn.WriteJSON(payload); err != nil {
+			if err := conn.writeJSON(payload); err != nil {
 				errCh <- err
 				return
 			}
@@ -174,7 +230,7 @@ func readFromControl(conn *websocket.Conn, sessions *ptyManager, errCh chan<- er
 				Type:        "networkInfo",
 				NetworkInfo: &info,
 			}
-			if err := conn.WriteJSON(payload); err != nil {
+			if err := conn.writeJSON(payload); err != nil {
 				errCh <- err
 				return
 			}
@@ -182,7 +238,7 @@ func readFromControl(conn *websocket.Conn, sessions *ptyManager, errCh chan<- er
 	}
 }
 
-func readFromPTY(conn *websocket.Conn, session *ptySession, errCh chan<- error) {
+func readFromPTY(conn *safeConn, session *ptySession, errCh chan<- error) {
 	ptm := session.current()
 	reader := bufio.NewReader(ptm)
 	buf := make([]byte, 2048)
@@ -195,7 +251,7 @@ func readFromPTY(conn *websocket.Conn, session *ptySession, errCh chan<- error) 
 		n, err := reader.Read(buf)
 		if n > 0 {
 			payload := AgentMessage{Type: "output", Data: string(buf[:n]), SessionID: session.sessionID}
-			if err := conn.WriteJSON(payload); err != nil {
+			if err := conn.writeJSON(payload); err != nil {
 				errCh <- err
 				return
 			}
@@ -212,11 +268,11 @@ func readFromPTY(conn *websocket.Conn, session *ptySession, errCh chan<- error) 
 	}
 }
 
-func sendHeartbeats(conn *websocket.Conn, errCh chan<- error) {
+func sendHeartbeats(conn *safeConn, errCh chan<- error) {
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 	for range ticker.C {
-		if err := conn.WriteJSON(AgentMessage{Type: "heartbeat"}); err != nil {
+		if err := conn.writeJSON(AgentMessage{Type: "heartbeat"}); err != nil {
 			errCh <- err
 			return
 		}

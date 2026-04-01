@@ -15,6 +15,7 @@ type agentServer struct {
 	deviceID    string
 	fingerprint map[string]any
 	server      *http.Server
+	sessions    *ptyManager
 }
 
 func newAgentServer(addr, token, deviceID string, fingerprint map[string]any) *agentServer {
@@ -29,6 +30,7 @@ func newAgentServer(addr, token, deviceID string, fingerprint map[string]any) *a
 		token:       token,
 		deviceID:    deviceID,
 		fingerprint: fingerprint,
+		sessions:    newPtyManager(),
 		server: &http.Server{
 			Addr:    addr,
 			Handler: mux,
@@ -47,20 +49,21 @@ func newAgentServer(addr, token, deviceID string, fingerprint map[string]any) *a
 
 	upgrader := websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
+		rawConn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Printf("failed to upgrade connection: %v", err)
 			return
 		}
-		defer conn.Close()
 
 		var hello ControlMessage
-		if err := conn.ReadJSON(&hello); err != nil {
+		if err := rawConn.ReadJSON(&hello); err != nil {
 			log.Printf("failed to read handshake: %v", err)
+			rawConn.Close()
 			return
 		}
 		if hello.Type != "hello" || hello.Token != s.token {
 			log.Printf("invalid handshake received")
+			rawConn.Close()
 			return
 		}
 
@@ -70,23 +73,34 @@ func newAgentServer(addr, token, deviceID string, fingerprint map[string]any) *a
 			AgentVersion: getAgentVersion(),
 			Fingerprint:  s.fingerprint,
 		}
-		if err := conn.WriteJSON(ack); err != nil {
+		if err := rawConn.WriteJSON(ack); err != nil {
 			log.Printf("failed to send handshake ack: %v", err)
+			rawConn.Close()
 			return
 		}
 
-		sessions := newPtyManager()
-		errCh := make(chan error, 1)
+		conn := newSafeConn(rawConn)
+		errCh := make(chan error, 3)
 		startPTY := func(session *ptySession) {
 			go readFromPTY(conn, session, errCh)
 		}
-		go readFromControl(conn, sessions, errCh, startPTY)
+
+		active := s.sessions.activeSessions()
+		if len(active) > 0 {
+			log.Printf("re-attaching %d existing session(s)", len(active))
+			for _, sess := range active {
+				sess.reset()
+				startPTY(sess)
+			}
+		}
+
+		go readFromControl(conn, s.sessions, errCh, startPTY)
 		go sendHeartbeats(conn, errCh)
 
 		if err := <-errCh; err != nil {
 			log.Printf("connection closed: %v", err)
 		}
-		sessions.closeAll()
+		conn.close()
 	})
 
 	return s
@@ -101,5 +115,6 @@ func (s *agentServer) start() error {
 }
 
 func (s *agentServer) shutdown(ctx context.Context) error {
+	s.sessions.closeAll()
 	return s.server.Shutdown(ctx)
 }
