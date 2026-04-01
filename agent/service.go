@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
+	"time"
 )
 
 const (
@@ -24,26 +27,125 @@ func serviceUp(listen, token, host, enroll string) error {
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
 
-	args := buildExecArgs(listen, token, host, enroll)
+	// Don't bake --enroll into the service file. Enrollment is a one-time
+	// operation: the agent stores the device key on first connect and uses
+	// it for all subsequent reconnections. If --enroll is provided, we run
+	// a one-shot enrollment first, then install the service without it.
+	if enroll != "" && host != "" {
+		fmt.Println("Enrolling with control server...")
+		enrollArgs := buildExecArgs(listen, token, host, enroll)
+		if err := runOneShot(exe, enrollArgs); err != nil {
+			return fmt.Errorf("enrollment failed: %w", err)
+		}
+		fmt.Println("Enrollment successful, device key stored.")
+	}
 
+	serviceArgs := buildExecArgs(listen, token, host, "")
+
+	var installErr error
 	switch runtime.GOOS {
 	case "linux":
-		return installSystemdService(exe, args)
+		installErr = installSystemdService(exe, serviceArgs)
 	case "darwin":
-		return installLaunchdService(exe, args)
+		installErr = installLaunchdService(exe, serviceArgs)
 	default:
 		return fmt.Errorf("service management is not supported on %s", runtime.GOOS)
 	}
-}
 
-func serviceDown() error {
+	if installErr != nil {
+		return installErr
+	}
+
+	fmt.Println("\nspectre-agent service installed and started.")
+	fmt.Println("  Check status:  spectre-agent status")
 	switch runtime.GOOS {
 	case "linux":
-		return uninstallSystemdService()
+		fmt.Println("  View logs:     journalctl -u spectre-agent -f")
 	case "darwin":
-		return uninstallLaunchdService()
+		fmt.Println("  View logs:     tail -f /var/log/spectre-agent.log")
+	}
+	fmt.Println("  Stop service:  sudo spectre-agent down")
+	return nil
+}
+
+func serviceDown(purge bool) error {
+	switch runtime.GOOS {
+	case "linux":
+		if err := uninstallSystemdService(); err != nil {
+			return err
+		}
+	case "darwin":
+		if err := uninstallLaunchdService(); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("service management is not supported on %s", runtime.GOOS)
+	}
+
+	_ = os.Remove(lockFilePath())
+
+	if purge {
+		purgeDataDirs()
+	}
+
+	fmt.Println("spectre-agent service stopped and removed.")
+	if !purge {
+		fmt.Println("  Device data preserved. Use --purge to also remove device keys and state.")
+	}
+	return nil
+}
+
+func purgeDataDirs() {
+	dirs := []string{}
+
+	if p, err := deviceInfoPath(); err == nil {
+		dirs = append(dirs, filepath.Dir(p))
+	}
+
+	sysDir := "/var/lib/spectre-agent"
+	if _, err := os.Stat(sysDir); err == nil {
+		dirs = append(dirs, sysDir)
+	}
+
+	for _, d := range dirs {
+		if err := os.RemoveAll(d); err != nil {
+			fmt.Printf("  warning: could not remove %s: %v\n", d, err)
+		} else {
+			fmt.Printf("  removed %s\n", d)
+		}
+	}
+}
+
+// runOneShot starts the agent briefly to complete enrollment, then stops it.
+func runOneShot(exe string, args []string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, exe, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	// Wait for enrollment to complete (device key to appear in device-info.json)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			_ = cmd.Process.Kill()
+			return fmt.Errorf("timed out waiting for enrollment")
+		case <-ticker.C:
+			info, err := ensureDeviceInfo()
+			if err == nil && info.DeviceKey != "" {
+				_ = cmd.Process.Signal(syscall.SIGTERM)
+				_ = cmd.Wait()
+				return nil
+			}
+		}
 	}
 }
 

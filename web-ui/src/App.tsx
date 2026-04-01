@@ -192,9 +192,9 @@ function App() {
       <section className="mx-auto max-w-5xl px-6 py-10 space-y-8">
         <Card>
           <CardHeader>
-            <CardTitle>Add Device</CardTitle>
+            <CardTitle>Add Device (agent connects to server)</CardTitle>
             <CardDescription>
-              Generate an enrollment token and run the command on your remote machine to register it.
+              The remote machine dials into this server. Best for machines behind NAT or firewalls.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -226,9 +226,9 @@ function App() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Connect to agent (outbound)</CardTitle>
+            <CardTitle>Connect to agent (server connects to agent)</CardTitle>
             <CardDescription>
-              Manually connect to an agent by address. Use this for agents with a reachable WebSocket server.
+              This server reaches out to the agent. Use when the agent machine is directly reachable on the network.
             </CardDescription>
           </CardHeader>
           <CardContent>

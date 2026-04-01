@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -43,7 +46,7 @@ func newRootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&host, "host", "", "Control server host (ws://host:port) to register with")
 	cmd.Flags().StringVar(&enroll, "enroll", "", "One-time enrollment token from the control server")
 
-	cmd.AddCommand(newUpCommand(), newDownCommand())
+	cmd.AddCommand(newUpCommand(), newDownCommand(), newStatusCommand())
 	return cmd
 }
 
@@ -70,16 +73,103 @@ func newUpCommand() *cobra.Command {
 }
 
 func newDownCommand() *cobra.Command {
-	return &cobra.Command{
+	var purge bool
+	cmd := &cobra.Command{
 		Use:          "down",
 		Short:        "Stop and remove the spectre-agent service",
-		Long:         "Stops the spectre-agent service and removes it from the system service configuration.",
-		Example:      "spectre-agent down",
+		Long:         "Stops the spectre-agent service and removes it from the system service configuration.\nUse --purge to also remove device data (device key, lock file).",
+		Example:      "spectre-agent down\nspectre-agent down --purge",
 		SilenceUsage: true,
 		Args:         cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return serviceDown()
+			return serviceDown(purge)
 		},
+	}
+	cmd.Flags().BoolVar(&purge, "purge", false, "Also remove device data (device key, enrollment state)")
+	return cmd
+}
+
+func newStatusCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:          "status",
+		Short:        "Show the status of the spectre-agent",
+		Long:         "Displays whether the agent is running, its PID, device ID, and enrollment state.",
+		Example:      "spectre-agent status",
+		SilenceUsage: true,
+		Args:         cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return showStatus()
+		},
+	}
+}
+
+func showStatus() error {
+	fmt.Printf("spectre-agent %s\n\n", getAgentVersion())
+
+	running, info := checkRunning()
+	if running && info != nil {
+		fmt.Printf("  Status:    running (pid %d)\n", info.PID)
+		fmt.Printf("  Agent ID:  %s\n", info.AgentID)
+		fmt.Printf("  Listen:    %s\n", info.Listen)
+		if info.Host != "" {
+			fmt.Printf("  Server:    %s\n", info.Host)
+		}
+	} else {
+		fmt.Println("  Status:    not running")
+	}
+
+	deviceInfo, err := ensureDeviceInfo()
+	if err == nil {
+		fmt.Printf("  Device ID: %s\n", deviceInfo.DeviceID)
+		if deviceInfo.DeviceKey != "" {
+			fmt.Printf("  Enrolled:  yes\n")
+		} else {
+			fmt.Printf("  Enrolled:  no\n")
+		}
+	}
+
+	path, _ := deviceInfoPath()
+	if path != "" {
+		fmt.Printf("  Data dir:  %s\n", filepath.Dir(path))
+	}
+
+	svcStatus := serviceStatus()
+	if svcStatus != "" {
+		fmt.Printf("  Service:   %s\n", svcStatus)
+	}
+
+	return nil
+}
+
+func checkRunning() (bool, *AgentInstanceInfo) {
+	info, err := readExistingInstance(lockFilePath())
+	if err != nil {
+		return false, nil
+	}
+	if processRunning(info.PID) {
+		return true, info
+	}
+	return false, nil
+}
+
+func serviceStatus() string {
+	switch runtime.GOOS {
+	case "linux":
+		if _, err := os.Stat(systemdUnitPath); err != nil {
+			return "not installed"
+		}
+		out, err := exec.Command("systemctl", "is-active", "spectre-agent.service").Output()
+		if err != nil {
+			return "installed (inactive)"
+		}
+		return "installed (" + strings.TrimSpace(string(out)) + ")"
+	case "darwin":
+		if _, err := os.Stat(launchdPlistPath); err != nil {
+			return "not installed"
+		}
+		return "installed"
+	default:
+		return ""
 	}
 }
 
