@@ -96,11 +96,11 @@ describe("App component", () => {
 
     const connectCalls = calls.filter(([url]) => url === `${window.location.origin}/agents/connect`);
     expect(connectCalls.length).toBeGreaterThanOrEqual(1);
-    expect(connectCalls[0]?.[1]).toMatchObject({
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address: "ws://test/ws", token: "secret" }),
-    });
+    const connectInit = connectCalls[0]?.[1];
+    expect(connectInit.method).toBe("POST");
+    expect(connectInit.body).toBe(JSON.stringify({ address: "ws://test/ws", token: "secret" }));
+    const headers = new Headers(connectInit.headers);
+    expect(headers.get("Content-Type")).toBe("application/json");
 
     const agentFetches = calls.filter(([url]) => url === `${window.location.origin}/agents`);
     // Initial load + post-submit refresh, with React 18 potentially double-invoking effects in tests.
