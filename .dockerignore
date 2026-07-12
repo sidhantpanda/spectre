@@ -1,0 +1,21 @@
+# Context for Docker builds is the repo root. Keep it small — the Dockerfiles
+# only need the pnpm workspace files plus server/ or web-ui/.
+**/node_modules
+**/dist
+.git
+.github
+.github-archive
+agent
+public
+scripts
+docs
+data
+server/data
+.cache
+**/*.log
+**/.DS_Store
+.env
+.env.*
+compose*.yaml
+LICENSE
+README.md

@@ -1,0 +1,7 @@
+packages:
+  - server
+  - web-ui
+allowBuilds:
+  esbuild: true
+onlyBuiltDependencies:
+  - esbuild

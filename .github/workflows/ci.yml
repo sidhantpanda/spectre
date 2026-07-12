@@ -31,47 +31,33 @@ jobs:
           GOARCH: amd64
         run: go build -o spectre-agent .
 
-  control-server:
+  node:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: pnpm
       - name: Install dependencies
-        working-directory: server
-        run: npm ci
-      - name: Test
-        working-directory: server
-        run: npm test
+        run: pnpm install --frozen-lockfile
+      - name: Lint web UI
+        run: pnpm --filter @spectre/web-ui run lint
       - name: Build
-        working-directory: server
-        run: npm run build
-      - name: Docker build
-        run: docker build ./server
+        run: pnpm -r run build
+      - name: Test
+        run: pnpm -r run test
 
-  web-ui:
+  docker:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - name: Install dependencies
-        working-directory: web-ui
-        run: npm ci
-      - name: Lint
-        working-directory: web-ui
-        run: npm run lint
-      - name: Test
-        working-directory: web-ui
-        run: npm test
-      - name: Build
-        working-directory: web-ui
-        run: npm run build
-      - name: Docker build
-        run: docker build ./web-ui
+      - name: Build server image
+        run: docker build -f server/Dockerfile .
+      - name: Build web UI image
+        run: docker build -f web-ui/Dockerfile .
