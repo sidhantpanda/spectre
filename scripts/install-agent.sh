@@ -35,9 +35,9 @@ trap cleanup EXIT
 
 if [[ -z "$TAG" ]]; then
   latest_json=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=20")
-  tag=$(printf '%s' "$latest_json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"agent-v[^"}]*"' | head -n1 | sed 's/.*"agent-v\([^"]*\)"/agent-v\1/')
+  tag=$(printf '%s' "$latest_json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"v[0-9][^"}]*"' | head -n1 | sed 's/.*"\(v[0-9][^"]*\)"/\1/')
   if [[ -z "$tag" ]]; then
-    echo "error: could not find latest agent-v* release tag" >&2
+    echo "error: could not find latest v* release tag" >&2
     exit 1
   fi
   display_tag="$tag"

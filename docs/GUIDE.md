@@ -269,15 +269,21 @@ The server image uses `pnpm deploy` to produce a self-contained, production-only
 
 ## Releases
 
-Pushing a git tag triggers automated releases:
+Everything ships from **one tag**. Push a single `v*` tag (e.g. `v1.2.3`) and the `Release` workflow:
 
-| Tag pattern | What happens |
-|-------------|-------------|
-| `server-v*` | Builds + pushes Docker image to `ghcr.io/sidhantpanda/spectre/server` |
-| `web-ui-v*` | Builds + pushes Docker image to `ghcr.io/sidhantpanda/spectre/web-ui` |
-| `agent-v*` | Cross-compiles agent binaries (linux/darwin/windows, amd64/arm64) and publishes to GitHub Releases |
+1. builds + pushes the **server** image to `ghcr.io/sidhantpanda/spectre/server`,
+2. builds + pushes the **web-ui** image to `ghcr.io/sidhantpanda/spectre/web-ui`,
+3. cross-compiles the **agent** binaries (linux/darwin, amd64/arm64), and
+4. publishes a single **GitHub release** for the tag with the agent binaries attached.
 
-Manual agent release: trigger the "Release Agent" workflow from the Actions tab. The install script (`install-agent.sh`) always downloads the latest `agent-v*` release.
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+Images are tagged with the full version plus `major.minor`, `major`, `latest`, and the commit SHA. The install script (`install-agent.sh`) downloads the agent from the latest `v*` release.
+
+Running the workflow manually (Actions tab → Release → *Run workflow*) builds all the same artifacts from the current commit — images tagged with the commit SHA — but does not publish a GitHub release or move the `latest` tag.
 
 ## Protocol reference
 
