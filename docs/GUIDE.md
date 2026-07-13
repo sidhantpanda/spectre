@@ -27,18 +27,20 @@ Two connection directions are supported:
 - **Server dials agent** (outbound) — for agents directly reachable on the same LAN.
 
 ```
-                                 ┌─────────────────┐
-                                 │  Control Server  │
-┌──────────┐    /terminal WS     │   (Node.js)      │
-│  Browser  │ ◄────────────────► │                  │
-│ (xterm.js)│                    └───────┬──┬───────┘
-└──────────┘                             │  │
-                              ┌──────────┘  └──────────┐
-                              ▼ inbound                 ▼ outbound
-                      ┌──────────────┐          ┌──────────────┐
-                      │   Agent A    │          │   Agent B    │
-                      │ behind NAT   │          │ on local LAN │
-                      └──────────────┘          └──────────────┘
+┌───────────┐    /terminal WS    ┌─────────────────┐
+│  Browser  │ ◄────────────────► │  Control Server │
+│ (xterm.js)│                    │    (Node.js)    │
+└───────────┘                    └────────┬────────┘
+                                          │
+                        ┌─────────────────┴─────────────────┐
+                        │                                   │
+                        ▲ inbound                           ▼ outbound
+                (agent dials in)                   (server dials out)
+                        │                                   │
+                ┌───────────────┐                   ┌───────────────┐
+                │    Agent A    │                   │    Agent B    │
+                │   behind NAT  │                   │  on local LAN │
+                └───────────────┘                   └───────────────┘
 ```
 
 ## Development
