@@ -36,6 +36,11 @@ export interface AgentRecord {
   status: AgentStatus;
   lastSeen: number;
   deviceId?: string;
+  /** Stable hardware identity; one physical machine keeps this across reconnects. */
+  identity?: string;
+  name?: string;
+  enrolledAt?: number;
+  firstSeen?: number;
   agentVersion?: string;
   fingerprint?: AgentFingerprint;
   docker?: DockerContainer[];
@@ -44,6 +49,16 @@ export interface AgentRecord {
   systemInfoError?: string;
   networkInfo?: NetworkInfo;
   networkInfoError?: string;
+}
+
+/** A row from the connection history. */
+export interface ConnectionRecord {
+  id: string;
+  deviceId: string;
+  address?: string;
+  connectedAt: number;
+  disconnectedAt?: number;
+  closeReason?: string;
 }
 
 /** Server to agent. */

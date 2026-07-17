@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Copy, Cpu, Gauge, HardDrive, MemoryStick, Monitor, Network } from "lucide-react";
+import { Check, Copy, Cpu, Gauge, HardDrive, MemoryStick, Monitor, Network, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -13,12 +13,14 @@ import {
   refreshDockerInfo,
   refreshNetworkInfo,
   refreshSystemInfo,
+  removeAgent,
   subscribeToAgentEvents,
 } from "./state/agents";
 import { getApiBase } from "./lib/api";
 import {
   createAuthKey,
   enrollCommand,
+  fetchConnectHost,
   listPendingDevices,
   type CreatedAuthKey,
   type PendingDevice,
@@ -52,7 +54,10 @@ function formatList(values?: string[]) {
 }
 
 function deviceKey(agent: Agent) {
-  return agent.deviceId ?? agent.id;
+  // The server already returns one row per physical device; this is a safety
+  // net for incremental events. Prefer the stable hardware identity so a
+  // machine re-enrolled with a new key still collapses to one row.
+  return agent.identity ?? agent.deviceId ?? agent.id;
 }
 
 function displayDeviceId(agent: Agent) {
@@ -89,6 +94,8 @@ function App() {
   const [pending, setPending] = useState<PendingDevice[]>([]);
   const [keyError, setKeyError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [connectHost, setConnectHost] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
   const navigate = useNavigate();
 
   async function loadAgents() {
@@ -112,6 +119,8 @@ function App() {
         .catch(() => setPending([]));
     loadPending();
     const pendingTimer = setInterval(loadPending, 5000);
+
+    fetchConnectHost().then(setConnectHost).catch(() => setConnectHost(null));
 
     const socket = subscribeToAgentEvents(
       (list) => setAgents(list),
@@ -141,6 +150,25 @@ function App() {
     [dedupedAgents],
   );
 
+  async function handleRemoveAgent(agent: Agent) {
+    if (!window.confirm("Remove this device? It will need to be enrolled again to reconnect.")) {
+      return;
+    }
+    setRemovingId(agent.id);
+    try {
+      await removeAgent(agent.id, API_BASE);
+      // Drop every raw row for this physical device, not just the clicked id;
+      // incremental events can leave more than one in local state.
+      const key = deviceKey(agent);
+      setAgents((prev) => prev.filter((a) => deviceKey(a) !== key));
+    } catch (err) {
+      console.error("failed to remove device", err);
+      window.alert((err as Error).message);
+    } finally {
+      setRemovingId(null);
+    }
+  }
+
   async function handleCreateAuthKey() {
     setIsCreatingKey(true);
     setKeyError(null);
@@ -154,7 +182,10 @@ function App() {
     }
   }
 
-  const command = useMemo(() => (createdKey ? enrollCommand(createdKey.key) : ""), [createdKey]);
+  const command = useMemo(
+    () => (createdKey ? enrollCommand(createdKey.key, connectHost ?? API_BASE.replace(/^http/, "ws")) : ""),
+    [createdKey, connectHost],
+  );
 
   function copyCommand() {
     navigator.clipboard.writeText(command).then(() => {
@@ -244,10 +275,18 @@ function App() {
           <CardContent className="space-y-3">
             {dedupedAgents.length === 0 && <p className="text-sm text-muted-foreground">No connections yet.</p>}
             {dedupedAgents.map((agent) => (
-              <button
+              <div
                 key={agent.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => navigate(`/agent/${agent.id}`)}
-                className="flex w-full flex-col gap-2 rounded-lg border bg-muted/40 p-4 text-left transition hover:border-primary"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    navigate(`/agent/${agent.id}`);
+                  }
+                }}
+                className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border bg-muted/40 p-4 text-left transition hover:border-primary"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1">
@@ -334,11 +373,26 @@ function App() {
                       </div>
                     </div>
                   </div>
-                  <div className="text-xs text-muted-foreground text-right">
+                  <div className="flex flex-col items-end gap-2 text-right text-xs text-muted-foreground">
                     <p>Last seen: {formatTimestamp(agent.lastSeen)}</p>
+                    {agent.status === "disconnected" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={removingId === agent.id}
+                        className="h-7 gap-1 text-destructive hover:text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveAgent(agent);
+                        }}
+                      >
+                        <Trash2 size={14} />
+                        {removingId === agent.id ? "Removing..." : "Remove"}
+                      </Button>
+                    )}
                   </div>
                 </div>
-              </button>
+              </div>
             ))}
           </CardContent>
         </Card>

@@ -25,8 +25,8 @@ The agent dials out to the server over a WebSocket and **never listens on a port
 └───────────┘                   └─────────────────┘                         └───────────────┘
                                          │                                    dials out only,
                                          ▼                                    no open ports
-                                    store.json
-                              (hashed keys, at rest)
+                                    spectre.db
+                          (devices, connections, hashed keys)
 ```
 
 Because the connection is always agent → server, Spectre works through NAT, CGNAT, and outbound-only firewalls, and there is no listening service to attack on the machines you connect to.
@@ -51,7 +51,7 @@ Spectre gives a browser a root shell. Before exposing it:
 - [ ] **Set a real `ADMIN_PASSWORD`** (`openssl rand -base64 24`). The server refuses to start without one.
 - [ ] **Terminate TLS** in front of the server and use `wss://` for agents. The supplied Compose file publishes only the UI's port, so it is the single place to add TLS.
 - [ ] **Never set `SPECTRE_DEV_NO_AUTH`.** It is refused outright when `NODE_ENV=production`.
-- [ ] **Back up `DATA_DIR`.** Losing `store.json` means re-enrolling every machine.
+- [ ] **Back up `DATA_DIR`.** Losing `spectre.db` means re-enrolling every machine.
 - [ ] **Set `TRUST_PROXY=1` only if** a proxy you control sets `X-Forwarded-For`. Otherwise the login rate limiter can be bypassed by forging the header.
 - [ ] **Revoke machines you no longer own** in the UI. Revocation kills the live session immediately.
 - [ ] Prefer **single-use auth keys**. Reusable keys enrol unlimited machines until they expire or are revoked.
@@ -62,7 +62,7 @@ There is currently **one admin and no per-machine access control**: anyone with 
 
 The `server` (API) and `web-ui` live in a single **pnpm workspace**. The `agent` is a separate Go module.
 
-Prerequisites: **Node 20+**, **pnpm 11+**, and **Go 1.21+** (only for the agent).
+Prerequisites: **Node 22+** (the server uses the built-in `node:sqlite`), **pnpm 11+**, and **Go 1.21+** (only for the agent).
 
 ```bash
 pnpm install     # install workspace deps (once)
@@ -121,23 +121,59 @@ A single self-contained Go binary. Put it on the machine, then enrol it.
 curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh | sudo bash
 ```
 
-**Option B — build it yourself.** Useful when there's no published release for your target. Match `GOOS`/`GOARCH` to the target machine:
+**Option B — build it here and copy it to a machine on your network.** This is the usual path for a home lab or LAN box: cross-compile on your dev machine, `scp` the binary over, and enrol it against your local server. No published release needed.
+
+**1. Find the target's OS and architecture.** Go cross-compiles to a specific `GOOS`/`GOARCH` pair, so you need to know what the target machine is. If you can reach it, ask it:
 
 ```bash
-# On your dev machine, from agent/:
-GOOS=linux GOARCH=amd64 go build -o spectre-agent .
-scp spectre-agent <user>@<remote>:/tmp/
-
-# On the remote machine:
-sudo install -m 0755 /tmp/spectre-agent /usr/local/bin/spectre-agent
+ssh <user>@<remote> 'uname -sm'
+# "Linux x86_64"   -> GOOS=linux  GOARCH=amd64
+# "Linux aarch64"  -> GOOS=linux  GOARCH=arm64   (Raspberry Pi OS 64-bit, etc.)
+# "Linux armv7l"   -> GOOS=linux  GOARCH=arm     (older 32-bit Pi)
+# "Darwin arm64"   -> GOOS=darwin GOARCH=arm64   (Apple Silicon Mac)
+# "Darwin x86_64"  -> GOOS=darwin GOARCH=amd64   (Intel Mac)
 ```
 
-| `GOOS` | `GOARCH` | Typical target |
-|--------|----------|----------------|
-| `linux` | `amd64` | Most servers, Intel/AMD NUCs |
-| `linux` | `arm64` | Raspberry Pi (64-bit), ARM servers |
-| `darwin` | `arm64` | Apple Silicon Mac |
-| `windows` | `amd64` | Windows (`-o spectre-agent.exe`) |
+| `uname -sm` | `GOOS` | `GOARCH` | Typical target |
+|-------------|--------|----------|----------------|
+| `Linux x86_64` | `linux` | `amd64` | Most servers, Intel/AMD NUCs |
+| `Linux aarch64` | `linux` | `arm64` | Raspberry Pi (64-bit), ARM servers |
+| `Linux armv7l` / `armv6l` | `linux` | `arm` | Raspberry Pi (32-bit), older SBCs |
+| `Darwin arm64` | `darwin` | `arm64` | Apple Silicon Mac |
+| `Darwin x86_64` | `darwin` | `amd64` | Intel Mac |
+| *(Windows)* | `windows` | `amd64` | Windows (build with `-o spectre-agent.exe`) |
+
+**2. Build for that target.** From `agent/`:
+
+```bash
+cd agent
+GOOS=linux GOARCH=arm64 go build -o spectre-agent .   # e.g. a 64-bit Raspberry Pi
+```
+
+`CGO_ENABLED=0` is the default here, so the binary is static and has no libc dependency — it runs on any machine of that arch, including minimal or musl-based distros.
+
+**3. Copy it to the target and install it.** `scp` cannot write to `/usr/local/bin` directly (it's root-owned), so land it in a writable spot first, then move it into place:
+
+```bash
+scp spectre-agent <user>@<remote>:/tmp/
+
+ssh <user>@<remote>
+sudo install -m 0755 /tmp/spectre-agent /usr/local/bin/spectre-agent && rm /tmp/spectre-agent
+```
+
+**4. Enrol it against your server.** On the target, point `--host` at your control server. On a LAN without TLS that's plaintext `ws://` to the server's IP and the published web-ui port (which proxies the agent endpoint):
+
+```bash
+# Interactive — prints a code to approve in the web UI:
+sudo spectre-agent up --host ws://<server-lan-ip>:3000
+
+# Or with an auth key from the UI:
+sudo spectre-agent up --host ws://<server-lan-ip>:3000 --authkey sk_...
+```
+
+> **`ws://` vs `wss://`:** a bare host or `wss://` uses TLS. Plaintext `ws://` to anything other than localhost logs a loud warning, because terminal I/O and the device key travel unencrypted. On a trusted home LAN that may be an acceptable trade-off; over the internet, always put the server behind a TLS proxy and use `wss://`.
+
+To rebuild after pulling changes, repeat steps 2–3 — the installed binary is replaced in place and the stored device key in `~/.spectre-agent` (or `/var/lib/spectre-agent`) is reused, so there's no need to re-enrol.
 
 ### Enrol and run
 
@@ -217,15 +253,20 @@ Node.js + TypeScript control plane that relays terminal sessions between browser
 
 ### Configuration
 
+The server loads the nearest `.env` file automatically (searching upward from its working directory), so a repo-root `.env` works whether you start from the root or from `server/`. Values already set in the environment take precedence over the file.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ADMIN_PASSWORD` | *(none)* | **Required.** Web UI password, min 12 chars. The server refuses to start without it |
-| `SPECTRE_DEV_NO_AUTH` | | Set to `1` to disable auth for local development. Fatal when `NODE_ENV=production` |
+| `ADMIN_PASSWORD` | *(none)* | **Required.** Web UI password, min 12 chars in production. Setting it turns authentication on; the server refuses to start without it unless `SPECTRE_DEV_NO_AUTH=1` |
+| `SPECTRE_DEV_NO_AUTH` | | Set to `1` to let the server start with **no** password (auth off) for local development. Ignored when `ADMIN_PASSWORD` is set — a password always means auth is on. Fatal when `NODE_ENV=production` |
+| `SPECTRE_PUBLIC_HOST` | *(auto)* | Address agents should dial, shown in the UI's enrollment command, e.g. `wss://spectre.example.com`. When unset, the UI advertises the server's detected LAN address and API port |
 | `PORT` | `8080` | HTTP/API port |
-| `DATA_DIR` | `./data` | Device store location (`store.json`, written `0600`) |
+| `DATA_DIR` | `./data` | SQLite database location (`spectre.db`, written `0600`) |
 | `CORS_ORIGIN` | *(empty)* | Comma-separated allowed origins. Empty = no cross-origin access |
 | `TRUST_PROXY` | | Set to `1` only behind a proxy that sets `X-Forwarded-For` |
 | `SPECTRE_DEBUG_TERMINAL` | | Set to `1` to log terminal output summaries. Off by default: output contains what the user typed |
+
+Authentication is on exactly when `ADMIN_PASSWORD` is set, so its state is consistent across page loads. `SPECTRE_DEV_NO_AUTH` only permits running without a password; it never overrides one.
 
 ### Authentication
 
@@ -258,8 +299,9 @@ Requires `Authorization: Bearer <session token>`:
 | `POST /authkeys` | Create an auth key. `{ reusable?, expiresInMs?, description? }` → `{ key, ... }`. **The plaintext key is returned only here** |
 | `GET /authkeys` | List auth keys (hints only, never the key) |
 | `DELETE /authkeys/:id` | Revoke an auth key |
-| `GET /devices` | List enrolled devices. Never includes key material |
-| `DELETE /devices/:id` | Revoke a device and drop its live connection |
+| `GET /devices` | List enrolled devices (one per physical machine). Never includes key material |
+| `GET /devices/:id/connections` | Connection history for a device |
+| `DELETE /devices/:id` | Revoke a device and drop its live connections |
 | `GET /devices/pending` | Machines waiting for approval |
 | `POST /devices/pending/:userCode/approve` | Approve a machine. `{ name? }` |
 | `POST /devices/pending/:userCode/deny` | Deny and discard the request |
@@ -274,7 +316,9 @@ WebSocket:
 
 ### Device store
 
-`store.json` holds device records, auth keys, and pending approvals. All credentials are stored as **SHA-256 hashes** — reading the file is not enough to impersonate a device or enrol a new one. Since these are high-entropy random tokens rather than passwords, a fast hash is appropriate; there is nothing to brute-force. The file is written `0600` via write-then-rename.
+State lives in a SQLite database (`spectre.db` in `DATA_DIR`, via Node's built-in `node:sqlite`, written `0600`): enrolled devices and their last-known state, auth keys, pending approvals, and a connection history. All credentials are stored as **SHA-256 hashes** — reading the file is not enough to impersonate a device or enrol a new one. These are high-entropy random tokens rather than passwords, so a fast hash is appropriate; there is nothing to brute-force. A pre-existing `store.json` from an earlier version is imported once on first start and renamed to `store.json.imported`.
+
+**Device identity.** A device is keyed by a stable hardware identity derived from what the agent reports — the Linux machine-id if present, otherwise its set of MAC addresses, otherwise the agent's persistent device id. This is why a machine that disconnects and reconnects — or is re-enrolled with a new key — stays a single row that flips between `connected` and `disconnected`, rather than appearing twice.
 
 ## Docker images
 

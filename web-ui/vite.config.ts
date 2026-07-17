@@ -38,6 +38,11 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      "/connect-info": {
+        target: CONTROL_SERVER_TARGET,
+        changeOrigin: true,
+        secure: false,
+      },
       "/healthz": {
         target: CONTROL_SERVER_TARGET,
         changeOrigin: true,

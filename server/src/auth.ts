@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { type NextFunction, type Request, type Response } from "express";
-import { ADMIN_PASSWORD, DEV_NO_AUTH } from "./config";
+import { ADMIN_PASSWORD } from "./config";
 
 interface Session {
   token: string;
@@ -54,8 +54,13 @@ function pruneExpired() {
   }
 }
 
+/**
+ * Authentication is on exactly when a password is configured. Startup config
+ * validation guarantees the only way to have no password is an explicit
+ * dev-mode opt-out, so "no password" here always means "intentionally open".
+ */
 export function isAuthEnabled(): boolean {
-  return !DEV_NO_AUTH;
+  return ADMIN_PASSWORD.length > 0;
 }
 
 export type LoginResult =
@@ -152,7 +157,7 @@ export function extractTicketFromUrl(url: string, host: string): string | null {
   }
 }
 
-const PUBLIC_PATHS = new Set(["/auth/login", "/auth/status", "/version", "/healthz"]);
+const PUBLIC_PATHS = new Set(["/auth/login", "/auth/status", "/version", "/healthz", "/connect-info"]);
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction) {
   if (!isAuthEnabled()) {

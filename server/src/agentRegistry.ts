@@ -1,20 +1,41 @@
-import { v4 as uuid } from "uuid";
 import WebSocket, { type RawData } from "ws";
+import {
+  canonicalAgentRecordFor,
+  listAgentRecords,
+  markDeviceSeen,
+  recordDeviceConnected,
+  recordDeviceDisconnected,
+  updateDeviceRuntime,
+} from "./deviceStore";
 import { summarizeOutput } from "./utils/output";
 import { type AgentMessage, type AgentRecord, type ControlMessage } from "./types";
 
 /**
- * Agents always dial the server, never the reverse. That is what lets them sit
- * behind NAT, and it means the server never opens outbound connections to
- * addresses it was handed.
+ * Live connection tracking.
+ *
+ * Device details and status live in SQLite (see deviceStore); this module only
+ * holds the open sockets, keyed by the device's credential id. A reconnect
+ * reuses the same device row rather than creating a new one, so devices no
+ * longer appear twice — once "connected" and once "disconnected".
  */
 
-export type AgentEntry = {
+type LiveConnection = {
   socket: WebSocket;
-  record: AgentRecord;
-  /** Store id of the device this connection authenticated as. */
-  deviceStoreId?: string;
+  deviceStoreId: string;
+  connectionId: string;
+  identity: string;
 };
+
+// Keyed by credential id (deviceStoreId) so a same-key reconnect replaces its
+// own entry. identityToStoreId enforces one live socket per physical device.
+const connections: Map<string, LiveConnection> = new Map();
+const identityToStoreId: Map<string, string> = new Map();
+
+const statusListeners: Set<(record: AgentRecord) => void> = new Set();
+const outputListeners: Set<(agentId: string, payload: AgentMessage) => void> = new Set();
+
+const MAX_AGENT_MESSAGE_BYTES = 256 * 1024;
+const DEBUG_TERMINAL = process.env.SPECTRE_DEBUG_TERMINAL === "1";
 
 export type AgentDependencies = {
   listAgents: () => AgentRecord[];
@@ -24,88 +45,68 @@ export type AgentDependencies = {
   refreshNetworkInfo?: () => void;
 };
 
-type AgentStatusListener = (record: AgentRecord) => void;
-type AgentOutputListener = (agentId: string, payload: AgentMessage) => void;
-
-const agents: Map<string, AgentEntry> = new Map();
-const statusListeners: Set<AgentStatusListener> = new Set();
-const outputListeners: Set<AgentOutputListener> = new Set();
-
-// A single terminal frame is bounded by the agent's read buffer; anything far
-// larger is a malformed or hostile peer rather than shell output.
-const MAX_AGENT_MESSAGE_BYTES = 256 * 1024;
-
-const DEBUG_TERMINAL = process.env.SPECTRE_DEBUG_TERMINAL === "1";
-
-const now = () => Date.now();
-
-export function onAgentStatusChange(listener: AgentStatusListener) {
+export function onAgentStatusChange(listener: (record: AgentRecord) => void) {
   statusListeners.add(listener);
   return () => statusListeners.delete(listener);
 }
 
-export function onAgentOutput(listener: AgentOutputListener) {
+export function onAgentOutput(listener: (agentId: string, payload: AgentMessage) => void) {
   outputListeners.add(listener);
   return () => outputListeners.delete(listener);
-}
-
-function emitStatus(record: AgentRecord) {
-  for (const listener of statusListeners) listener(record);
 }
 
 function emitOutput(agentId: string, payload: AgentMessage) {
   for (const listener of outputListeners) listener(agentId, payload);
 }
 
-export function listAgents() {
-  return Array.from(agents.values()).map((a) => a.record);
+/** Emits the canonical (deduped) record for whichever device this row belongs to. */
+function emitDeviceUpdate(deviceStoreId: string) {
+  const record = canonicalAgentRecordFor(deviceStoreId);
+  if (!record) return;
+  for (const listener of statusListeners) listener(record);
 }
 
-export function currentAgent(agentId: string) {
-  return agents.get(agentId);
+export function listAgents(): AgentRecord[] {
+  return listAgentRecords();
+}
+
+/** Resolves the device shown in the UI for a given id (used by the terminal WS). */
+export function currentAgent(agentId: string): { record: AgentRecord } | undefined {
+  const record = canonicalAgentRecordFor(agentId);
+  return record ? { record } : undefined;
 }
 
 export function pushToAgent(agentId: string, message: ControlMessage) {
-  const entry = agents.get(agentId);
-  if (!entry || entry.record.status !== "connected") {
+  const conn = connections.get(agentId);
+  if (!conn || conn.socket.readyState !== WebSocket.OPEN) {
     throw new Error("agent not connected");
   }
-  entry.socket.send(JSON.stringify(message));
+  conn.socket.send(JSON.stringify(message));
 }
 
-/** Drops any live connections belonging to a revoked device. */
+/** Drops every live connection belonging to a device (used on revoke). */
 export function disconnectDevice(deviceStoreId: string) {
-  for (const entry of agents.values()) {
-    if (entry.deviceStoreId !== deviceStoreId) continue;
-    entry.record.status = "disconnected";
-    entry.record.lastSeen = now();
-    emitStatus(entry.record);
-    if (entry.socket.readyState === WebSocket.OPEN) {
-      entry.socket.close(4003, "device revoked");
+  for (const conn of connections.values()) {
+    if (conn.deviceStoreId !== deviceStoreId) continue;
+    if (conn.socket.readyState === WebSocket.OPEN) {
+      conn.socket.close(4003, "device revoked");
     }
   }
 }
 
 export function registerInboundAgent(socket: WebSocket, address: string, deviceStoreId?: string) {
-  const id = uuid();
-  const entry: AgentEntry = {
-    socket,
-    deviceStoreId,
-    record: {
-      id,
-      connectionId: uuid(),
-      address,
-      status: "connecting",
-      lastSeen: now(),
-    },
-  };
-  agents.set(id, entry);
-  emitStatus(entry.record);
+  // Enrollment always resolves a device row before the socket is accepted.
+  if (!deviceStoreId) {
+    socket.close(4401, "unidentified device");
+    return;
+  }
+
+  let connectionId: string | null = null;
 
   socket.on("message", (data: RawData) => {
     const raw = data.toString();
     if (raw.length > MAX_AGENT_MESSAGE_BYTES) {
-      console.warn(`[agent inbound] oversized message from ${address}, closing`);
+      console.warn(`[agent] oversized message from ${address}, closing`);
       socket.close(1009, "message too large");
       return;
     }
@@ -114,101 +115,102 @@ export function registerInboundAgent(socket: WebSocket, address: string, deviceS
     try {
       payload = JSON.parse(raw) as AgentMessage;
     } catch {
-      console.warn(`[agent inbound] malformed message from ${address}`);
+      console.warn(`[agent] malformed message from ${address}`);
       return;
     }
 
-    entry.record.lastSeen = now();
-
     switch (payload.type) {
       case "hello": {
-        const deviceId = payload.agentId;
-        if (activeAgentFor(deviceId, id)) {
-          entry.record.status = "disconnected";
-          entry.record.lastSeen = now();
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.close(4001, "agent already connected (keeping first session)");
-          }
-          emitStatus(entry.record);
-          return;
+        const { connectionId: cid, identity } = recordDeviceConnected(deviceStoreId, {
+          address,
+          agentDeviceId: payload.agentId,
+          agentVersion: payload.agentVersion,
+          fingerprint: payload.fingerprint,
+        });
+        connectionId = cid;
+
+        // One live socket per physical device: if this machine already had a
+        // connection (a ghost from a dropped link, or a duplicate agent), close
+        // the old one and let the newest win.
+        const previousStoreId = identityToStoreId.get(identity);
+        if (previousStoreId && previousStoreId !== deviceStoreId) {
+          connections.get(previousStoreId)?.socket.close(4004, "superseded by newer connection");
+          connections.delete(previousStoreId);
         }
-        entry.record.status = "connected";
-        entry.record.deviceId = deviceId;
-        entry.record.fingerprint = payload.fingerprint;
-        entry.record.agentVersion = payload.agentVersion;
+        const sameKeyGhost = connections.get(deviceStoreId);
+        if (sameKeyGhost && sameKeyGhost.socket !== socket && sameKeyGhost.socket.readyState === WebSocket.OPEN) {
+          sameKeyGhost.socket.close(4004, "superseded by newer connection");
+        }
+
+        connections.set(deviceStoreId, { socket, deviceStoreId, connectionId: cid, identity });
+        identityToStoreId.set(identity, deviceStoreId);
+
         socket.send(JSON.stringify({ type: "hello" } satisfies ControlMessage));
-        emitStatus(entry.record);
-        requestDockerInfo(id);
-        requestSystemInfo(id);
-        requestNetworkInfo(id);
+        emitDeviceUpdate(deviceStoreId);
+        requestDockerInfo(deviceStoreId);
+        requestSystemInfo(deviceStoreId);
+        requestNetworkInfo(deviceStoreId);
         return;
       }
       case "output": {
-        emitOutput(id, payload);
-        // Terminal output is the operator's shell content: command lines,
-        // secrets they echo, file contents. It never goes to the server log
-        // unless a developer explicitly opts in.
+        emitOutput(deviceStoreId, payload);
         if (DEBUG_TERMINAL) {
           const summary = summarizeOutput(payload.data);
-          if (summary) {
-            const label = entry.record.deviceId ?? entry.record.id;
-            console.log(`[agent ${label}] ${summary}`);
-          }
+          if (summary) console.log(`[agent ${deviceStoreId}] ${summary}`);
         }
         return;
       }
       case "heartbeat":
-        entry.record.status = "connected";
+        markDeviceSeen(deviceStoreId);
         return;
       case "dockerInfo":
-        entry.record.docker = payload.containers ?? [];
-        entry.record.dockerError = payload.error;
-        emitStatus(entry.record);
+        updateDeviceRuntime(deviceStoreId, { docker: payload.containers ?? [] });
+        emitDeviceUpdate(deviceStoreId);
         return;
       case "systemInfo":
-        entry.record.systemInfo = payload.systemInfo;
-        entry.record.systemInfoError = payload.error;
-        emitStatus(entry.record);
+        if (payload.systemInfo) updateDeviceRuntime(deviceStoreId, { systemInfo: payload.systemInfo });
+        emitDeviceUpdate(deviceStoreId);
         return;
       case "networkInfo":
-        entry.record.networkInfo = payload.networkInfo;
-        entry.record.networkInfoError = payload.error;
-        emitStatus(entry.record);
+        if (payload.networkInfo) updateDeviceRuntime(deviceStoreId, { networkInfo: payload.networkInfo });
+        emitDeviceUpdate(deviceStoreId);
         return;
     }
   });
 
+  const teardown = (reason: string) => {
+    // Only tear down if this socket is still the current one for the device; a
+    // newer connection may have already replaced it.
+    const current = connections.get(deviceStoreId);
+    if (current && current.socket !== socket) return;
+
+    if (connectionId) recordDeviceDisconnected(deviceStoreId, connectionId, reason);
+    else recordDeviceDisconnected(deviceStoreId, "", reason);
+
+    connections.delete(deviceStoreId);
+    const conn = current;
+    if (conn && identityToStoreId.get(conn.identity) === deviceStoreId) {
+      identityToStoreId.delete(conn.identity);
+    }
+    emitDeviceUpdate(deviceStoreId);
+  };
+
   socket.on("close", () => {
-    entry.record.status = "disconnected";
-    entry.record.lastSeen = now();
-    emitStatus(entry.record);
-    console.log(`[agent inbound] closed ${address} (id=${id})`);
+    console.log(`[agent] closed ${address} (device=${deviceStoreId})`);
+    teardown("connection closed");
   });
 
   socket.on("error", (err: Error) => {
-    entry.record.status = "disconnected";
-    entry.record.lastSeen = now();
-    emitStatus(entry.record);
-    console.warn(`[agent inbound] error ${address} (id=${id}): ${err.message}`);
+    console.warn(`[agent] error ${address} (device=${deviceStoreId}): ${err.message}`);
+    teardown(err.message);
   });
-}
-
-function activeAgentFor(deviceId: string | undefined, currentId: string) {
-  if (!deviceId) return undefined;
-  for (const [id, entry] of agents.entries()) {
-    if (id === currentId) continue;
-    if (entry.record.deviceId === deviceId && entry.record.status !== "disconnected") {
-      return { id, entry };
-    }
-  }
-  return undefined;
 }
 
 function requestInfo(agentId: string, type: "dockerInfo" | "systemInfo" | "networkInfo") {
   try {
     pushToAgent(agentId, { type });
   } catch (err) {
-    console.warn(`[${type}] unable to request from agent ${agentId}: ${(err as Error).message}`);
+    console.warn(`[${type}] unable to request from ${agentId}: ${(err as Error).message}`);
   }
 }
 
@@ -217,9 +219,7 @@ export const requestSystemInfo = (agentId: string) => requestInfo(agentId, "syst
 export const requestNetworkInfo = (agentId: string) => requestInfo(agentId, "networkInfo");
 
 function refreshAll(type: "dockerInfo" | "systemInfo" | "networkInfo") {
-  for (const [id, entry] of agents.entries()) {
-    if (entry.record.status === "connected") requestInfo(id, type);
-  }
+  for (const id of connections.keys()) requestInfo(id, type);
 }
 
 export const refreshAllDockerInfo = () => refreshAll("dockerInfo");
@@ -230,17 +230,15 @@ const STALE_THRESHOLD_MS = 90_000;
 const SWEEP_INTERVAL_MS = 60_000;
 
 function sweepStaleAgents() {
-  const cutoff = now() - STALE_THRESHOLD_MS;
-  for (const [id, entry] of agents.entries()) {
-    if (entry.record.status !== "connected") continue;
-    if (entry.record.lastSeen < cutoff) {
-      console.log(`[sweep] evicting stale agent ${id}`);
-      entry.record.status = "disconnected";
-      entry.record.lastSeen = now();
-      if (entry.socket.readyState === WebSocket.OPEN) {
-        entry.socket.close(4002, "heartbeat timeout");
+  const cutoff = Date.now() - STALE_THRESHOLD_MS;
+  for (const record of listAgentRecords()) {
+    if (record.status !== "connected") continue;
+    if (record.lastSeen < cutoff) {
+      const conn = connections.get(record.id);
+      if (conn && conn.socket.readyState === WebSocket.OPEN) {
+        console.log(`[sweep] evicting stale agent ${record.id}`);
+        conn.socket.close(4002, "heartbeat timeout");
       }
-      emitStatus(entry.record);
     }
   }
 }
@@ -249,7 +247,15 @@ export function startStaleAgentSweep() {
   return setInterval(sweepStaleAgents, SWEEP_INTERVAL_MS);
 }
 
-/** Test seam: clears the registry. */
+/** Test seam: closes all live sockets and clears the maps. */
 export function resetAgentsForTest() {
-  agents.clear();
+  for (const conn of connections.values()) {
+    try {
+      conn.socket.close();
+    } catch {
+      /* ignore */
+    }
+  }
+  connections.clear();
+  identityToStoreId.clear();
 }

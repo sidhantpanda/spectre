@@ -100,8 +100,28 @@ export async function revokeDevice(id: string): Promise<void> {
   await expectOk(await authFetch(`${API_BASE}/devices/${id}`, { method: "DELETE" }), "revoke device");
 }
 
+/**
+ * The address an agent should dial, as reported by the server.
+ *
+ * The browser's own origin is the wrong thing to show here: in development it's
+ * the Vite dev port, and it's always "localhost" for whoever loaded the page,
+ * which no other machine can reach. The server knows its real LAN address (or
+ * the operator-configured public host), so we ask it.
+ */
+export async function fetchConnectHost(): Promise<string> {
+  try {
+    const res = await fetch(`${API_BASE}/connect-info`);
+    if (res.ok) {
+      const { host } = (await res.json()) as { host?: string };
+      if (host) return host;
+    }
+  } catch {
+    // Fall through to the browser origin.
+  }
+  return API_BASE.replace(/^http/, "ws");
+}
+
 /** The command an operator pastes on the machine they want to add. */
-export function enrollCommand(authKey: string): string {
-  const host = API_BASE.replace(/^http/, "ws");
+export function enrollCommand(authKey: string, host: string): string {
   return `sudo spectre-agent up --host ${host} --authkey ${authKey}`;
 }

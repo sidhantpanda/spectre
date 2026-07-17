@@ -41,6 +41,11 @@ export type Agent = {
   status: AgentStatus;
   lastSeen: number;
   deviceId?: string;
+  /** Stable hardware identity; one physical machine keeps this across reconnects. */
+  identity?: string;
+  name?: string;
+  enrolledAt?: number;
+  firstSeen?: number;
   agentVersion?: string;
   fingerprint?: AgentFingerprint;
   docker?: DockerContainer[];
@@ -127,6 +132,15 @@ export function subscribeToAgentEvents(
       }
     },
   };
+}
+
+/** Permanently removes a disconnected device from the dashboard. */
+export async function removeAgent(id: string, apiBase: string = API_BASE): Promise<void> {
+  const res = await authFetch(`${apiBase}/agents/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? "failed to remove device");
+  }
 }
 
 export async function refreshDockerInfo(apiBase: string = API_BASE): Promise<void> {

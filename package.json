@@ -4,15 +4,18 @@
   "private": true,
   "packageManager": "pnpm@11.7.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
-    "dev": "SPECTRE_DEV_NO_AUTH=1 pnpm --parallel --filter @spectre/server --filter @spectre/web-ui run dev",
-    "dev:server": "SPECTRE_DEV_NO_AUTH=1 pnpm --filter @spectre/server run dev",
+    "dev": "cross-env SPECTRE_DEV_NO_AUTH=1 pnpm --parallel --filter @spectre/server --filter @spectre/web-ui run dev",
+    "dev:server": "cross-env SPECTRE_DEV_NO_AUTH=1 pnpm --filter @spectre/server run dev",
     "dev:web": "pnpm --filter @spectre/web-ui run dev",
     "dev:agent": "cd agent && AGENT_HOST=ws://localhost:8080 ./dev.sh",
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
     "lint": "pnpm --filter @spectre/web-ui run lint"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3"
   }
 }

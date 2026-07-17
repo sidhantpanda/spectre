@@ -9,21 +9,24 @@ import {
   refreshAllSystemInfo,
 } from "./agentRegistry";
 import { authMiddleware, extractToken, isAuthEnabled, issueWsTicket, login, logout } from "./auth";
-import { corsOrigins } from "./config";
+import { corsOrigins, PORT, PUBLIC_HOST } from "./config";
 import {
   approvePendingDevice,
   createAuthKey,
   createPendingDevice,
+  deleteDevice,
   denyPendingDevice,
+  deviceStoreIdsFor,
   isInitialized as isDeviceStoreInitialized,
   listAuthKeys,
+  listConnections,
   listDevices,
   listPendingDevices,
   pollPendingDevice,
   revokeAuthKey,
   revokeDevice,
 } from "./deviceStore";
-import { clientKey } from "./utils/net";
+import { clientKey, primaryHostAddress } from "./utils/net";
 import { rateLimit } from "./utils/rateLimit";
 import { getServerVersion } from "./version";
 
@@ -76,6 +79,15 @@ export function createApp(
 
   app.get("/auth/status", (_req: Request, res: Response) => {
     res.json({ authEnabled: isAuthEnabled() });
+  });
+
+  // Where an agent should dial to reach this server. Used to build the
+  // enrollment command in the UI so it shows a reachable address, not the
+  // browser's own URL. Behind a TLS proxy, set SPECTRE_PUBLIC_HOST; otherwise
+  // the server advertises its detected LAN address and API port.
+  app.get("/connect-info", (_req: Request, res: Response) => {
+    const host = PUBLIC_HOST || `ws://${primaryHostAddress()}:${PORT}`;
+    res.json({ host });
   });
 
   app.post(
@@ -173,6 +185,20 @@ export function createApp(
     res.json({ status: "requested" });
   });
 
+  // Removes a disconnected device from the dashboard for good. A connected
+  // device can't be removed this way — revoke it instead, so its live socket is
+  // dropped rather than left dangling.
+  app.delete("/agents/:id", requireStore, (req: Request, res: Response) => {
+    const result = deleteDevice(req.params.id);
+    if (result === "not_found") {
+      return res.status(404).json({ error: "device not found" });
+    }
+    if (result === "connected") {
+      return res.status(409).json({ error: "device is connected" });
+    }
+    res.json({ ok: true });
+  });
+
   // --- Auth keys
 
   app.post("/authkeys", requireStore, (req: Request, res: Response) => {
@@ -207,12 +233,19 @@ export function createApp(
     res.json(listDevices());
   });
 
+  app.get("/devices/:id/connections", requireStore, (req: Request, res: Response) => {
+    res.json(listConnections(req.params.id));
+  });
+
   app.delete("/devices/:id", requireStore, (req: Request, res: Response) => {
+    // Capture the credential rows before revoking, so we can drop every live
+    // connection for this physical device (it may hold more than one key).
+    const storeIds = deviceStoreIdsFor(req.params.id);
     if (!revokeDevice(req.params.id)) {
       return res.status(404).json({ error: "device not found" });
     }
     // Revocation has to take effect now, not at the next reconnect.
-    disconnectDevice(req.params.id);
+    for (const storeId of storeIds) disconnectDevice(storeId);
     res.json({ ok: true });
   });
 

@@ -80,7 +80,7 @@ Spectre gives a browser a root shell on your machines. That deserves to be state
 | | |
 |---|---|
 | **Who can open a shell** | Anyone with the `ADMIN_PASSWORD`. There is one admin; there are no per-user accounts or per-machine ACLs yet. |
-| **How machines authenticate** | Each machine holds its own **device key**, issued at enrollment and stored `0600`. Keys are stored **hashed** on the server — a stolen `store.json` cannot impersonate a machine. |
+| **How machines authenticate** | Each machine holds its own **device key**, issued at enrollment and stored `0600`. Keys are stored **hashed** on the server — a stolen database cannot impersonate a machine. |
 | **How machines are added** | An **auth key** (single-use by default, expiring) or an admin approving a code. A machine is never trusted until you say so. |
 | **What the agent exposes** | Nothing. It dials out and listens on no port. |
 | **Revoking a machine** | Revoke it in the UI — the live session is killed immediately and the key stops working. |
@@ -96,7 +96,7 @@ Found a security issue? Please report it privately rather than opening a public 
 
 ## Develop
 
-`server` (API) and `web-ui` are a **pnpm workspace**; `agent` is a Go module. You need **Node 20+**, **pnpm 11+**, and **Go 1.21+** for the agent.
+`server` (API) and `web-ui` are a **pnpm workspace**; `agent` is a Go module. You need **Node 22+**, **pnpm 11+**, and **Go 1.21+** for the agent.
 
 ```bash
 pnpm install     # once

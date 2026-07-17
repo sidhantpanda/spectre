@@ -1,8 +1,11 @@
+// Must be first: loads .env into process.env before ./config reads it.
+import "./loadEnv";
 import { createServer } from "http";
 import { startStaleAgentSweep } from "./agentRegistry";
 import { createApp } from "./app";
 import { ConfigError, DATA_DIR, PORT, validateConfig } from "./config";
 import { initDeviceStore } from "./deviceStore";
+import { lanAddresses } from "./utils/net";
 import { attachWebSockets } from "./websockets";
 
 export { createApp } from "./app";
@@ -29,9 +32,16 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
   startStaleAgentSweep();
 
   httpServer.listen(PORT, () => {
+    const addresses = lanAddresses();
+    const primary = addresses[0] ?? "localhost";
+
     console.log(`Spectre control server listening on :${PORT}`);
-    console.log(`Device store: ${DATA_DIR}/store.json`);
+    console.log(`Device store: ${DATA_DIR}/spectre.db`);
+    if (addresses.length > 0) {
+      console.log(`Reachable on this network at: ${addresses.map((ip) => `${ip}:${PORT}`).join(", ")}`);
+    }
     console.log(`Add a machine: create an auth key in the web UI, then run`);
-    console.log(`  spectre-agent up --host wss://<this-server> --authkey <key>`);
+    console.log(`  spectre-agent up --host ws://${primary}:${PORT} --authkey <key>`);
+    console.log(`(use wss:// once the server is behind a TLS proxy)`);
   });
 }
