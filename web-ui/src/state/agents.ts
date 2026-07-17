@@ -4,7 +4,6 @@ import { authFetch } from "../lib/auth";
 const API_BASE = getApiBase();
 
 export type AgentStatus = "connecting" | "connected" | "disconnected";
-export type AgentDirection = "inbound" | "outbound";
 
 export type AgentFingerprint = {
   hostname: string;
@@ -44,8 +43,6 @@ export type Agent = {
   deviceId?: string;
   agentVersion?: string;
   fingerprint?: AgentFingerprint;
-  remoteAgentId?: string;
-  direction: AgentDirection;
   docker?: DockerContainer[];
   dockerError?: string;
   systemInfo?: SystemInfo;
@@ -64,31 +61,72 @@ export type AgentEvent =
   | { type: "agents"; agents: Agent[] }
   | { type: "agent"; agent: Agent };
 
-function buildAgentEventsUrl(apiBase: string = API_BASE) {
-  return buildWsUrl("/agents/events", apiBase);
-}
+export type AgentEventHandlers = {
+  onOpen?: () => void;
+  onClose?: () => void;
+  onError?: () => void;
+};
 
+export type AgentEventSubscription = { close: () => void };
+
+/**
+ * Subscribes to agent events.
+ *
+ * Opening the socket first requires a round trip to mint a WebSocket ticket, so
+ * the socket does not exist synchronously. This returns a handle that is safe to
+ * close before or after the socket opens, and takes lifecycle callbacks rather
+ * than exposing the socket itself.
+ */
 export function subscribeToAgentEvents(
   onAgents: (agents: Agent[]) => void,
   onAgentUpdate: (agent: Agent) => void,
   apiBase: string = API_BASE,
-) {
-  const socket = new WebSocket(buildAgentEventsUrl(apiBase));
+  handlers: AgentEventHandlers = {},
+): AgentEventSubscription {
+  let socket: WebSocket | null = null;
+  let closed = false;
 
-  socket.onmessage = (evt) => {
-    try {
-      const payload = JSON.parse(evt.data) as AgentEvent;
-      if (payload.type === "agents") {
-        onAgents(payload.agents);
-      } else if (payload.type === "agent") {
-        onAgentUpdate(payload.agent);
+  void buildWsUrl("/agents/events", apiBase)
+    .then((url) => {
+      if (closed) return;
+      socket = new WebSocket(url);
+      socket.onopen = () => handlers.onOpen?.();
+      socket.onclose = () => {
+        if (!closed) handlers.onClose?.();
+      };
+      socket.onerror = () => {
+        if (!closed) handlers.onError?.();
+      };
+      socket.onmessage = (evt) => {
+        try {
+          const payload = JSON.parse(evt.data) as AgentEvent;
+          if (payload.type === "agents") {
+            onAgents(payload.agents);
+          } else if (payload.type === "agent") {
+            onAgentUpdate(payload.agent);
+          }
+        } catch {
+          // ignore malformed events
+        }
+      };
+    })
+    .catch(() => {
+      if (!closed) handlers.onError?.();
+    });
+
+  return {
+    close: () => {
+      closed = true;
+      if (socket) {
+        socket.onopen = null;
+        socket.onclose = null;
+        socket.onerror = null;
+        socket.onmessage = null;
+        socket.close();
+        socket = null;
       }
-    } catch {
-      // ignore malformed events
-    }
+    },
   };
-
-  return socket;
 }
 
 export async function refreshDockerInfo(apiBase: string = API_BASE): Promise<void> {

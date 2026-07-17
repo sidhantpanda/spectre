@@ -118,10 +118,25 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
 
     const isTermUsable = () => termRef.current === term && !!term.element?.isConnected;
 
-    const connect = () => {
+    const connect = async () => {
       if (cancelled) return;
       setStatus("connecting");
-      const socket = new WebSocket(buildWsUrl(`/terminal?id=${encodeURIComponent(agentId)}`, apiBase));
+
+      // Each attempt mints a fresh single-use ticket; a reconnect cannot reuse
+      // the previous one.
+      let url: string;
+      try {
+        url = await buildWsUrl(`/terminal?id=${encodeURIComponent(agentId)}`, apiBase);
+      } catch {
+        if (isTermUsable()) {
+          term.writeln("\r\n[error] could not authenticate terminal session");
+        }
+        setStatus("error");
+        return;
+      }
+      if (cancelled) return;
+
+      const socket = new WebSocket(url);
       socketRef.current = socket;
 
       if (isTermUsable()) {
@@ -183,7 +198,7 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
           term.writeln("\r\n[disconnected] retrying...");
         }
         backoff = Math.min(backoff * 2, 5000);
-        reconnectTimer.current = window.setTimeout(connect, backoff);
+        reconnectTimer.current = window.setTimeout(() => void connect(), backoff);
       };
 
       socket.onclose = scheduleReconnect;
@@ -196,7 +211,7 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
       };
     };
 
-    connect();
+    void connect();
 
     return () => {
       cancelled = true;

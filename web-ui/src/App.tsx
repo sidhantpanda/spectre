@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Copy, Cpu, Gauge, HardDrive, MemoryStick, Monitor, Network } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "./components/ui/badge";
@@ -16,7 +16,13 @@ import {
   subscribeToAgentEvents,
 } from "./state/agents";
 import { getApiBase } from "./lib/api";
-import { authFetch } from "./lib/auth";
+import {
+  createAuthKey,
+  enrollCommand,
+  listPendingDevices,
+  type CreatedAuthKey,
+  type PendingDevice,
+} from "./state/enrollment";
 
 const API_BASE = getApiBase();
 
@@ -46,7 +52,7 @@ function formatList(values?: string[]) {
 }
 
 function deviceKey(agent: Agent) {
-  return agent.deviceId ?? agent.remoteAgentId ?? agent.id;
+  return agent.deviceId ?? agent.id;
 }
 
 function displayDeviceId(agent: Agent) {
@@ -78,11 +84,10 @@ function dedupeAgents(list: Agent[]) {
 
 function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [address, setAddress] = useState("");
-  const [token, setToken] = useState("changeme");
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [enrollmentToken, setEnrollmentToken] = useState<{ token: string; expiresAt: number } | null>(null);
-  const [isEnrolling, setIsEnrolling] = useState(false);
+  const [createdKey, setCreatedKey] = useState<CreatedAuthKey | null>(null);
+  const [isCreatingKey, setIsCreatingKey] = useState(false);
+  const [pending, setPending] = useState<PendingDevice[]>([]);
+  const [keyError, setKeyError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const navigate = useNavigate();
 
@@ -100,6 +105,14 @@ function App() {
     refreshSystemInfo(API_BASE);
     refreshNetworkInfo(API_BASE);
     loadAgents();
+
+    const loadPending = () =>
+      listPendingDevices()
+        .then(setPending)
+        .catch(() => setPending([]));
+    loadPending();
+    const pendingTimer = setInterval(loadPending, 5000);
+
     const socket = subscribeToAgentEvents(
       (list) => setAgents(list),
       (agent) =>
@@ -115,7 +128,10 @@ function App() {
         }),
       API_BASE,
     );
-    return () => socket.close();
+    return () => {
+      clearInterval(pendingTimer);
+      socket.close();
+    };
   }, []);
 
   const dedupedAgents = useMemo(() => dedupeAgents(agents), [agents]);
@@ -125,50 +141,23 @@ function App() {
     [dedupedAgents],
   );
 
-  async function handleConnect(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!address) return;
-    setIsConnecting(true);
-    try {
-      await authFetch(`${API_BASE}/agents/connect`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ address, token }),
-      });
-      setAddress("");
-      await loadAgents();
-    } catch (err) {
-      console.error("failed to connect", err);
-    } finally {
-      setIsConnecting(false);
-    }
-  }
-
-  async function handleEnroll() {
-    setIsEnrolling(true);
+  async function handleCreateAuthKey() {
+    setIsCreatingKey(true);
+    setKeyError(null);
     setCopied(false);
     try {
-      const res = await authFetch(`${API_BASE}/devices/enroll`, { method: "POST" });
-      if (!res.ok) throw new Error("failed to create enrollment token");
-      const data = await res.json();
-      setEnrollmentToken(data);
+      setCreatedKey(await createAuthKey({ reusable: false }));
     } catch (err) {
-      console.error("failed to enroll", err);
+      setKeyError((err as Error).message);
     } finally {
-      setIsEnrolling(false);
+      setIsCreatingKey(false);
     }
   }
 
-  const enrollCommand = useCallback(() => {
-    if (!enrollmentToken) return "";
-    const wsHost = API_BASE.replace(/^http/, "ws");
-    return `spectre-agent up --host ${wsHost} --enroll ${enrollmentToken.token}`;
-  }, [enrollmentToken]);
+  const command = useMemo(() => (createdKey ? enrollCommand(createdKey.key) : ""), [createdKey]);
 
-  function copyEnrollCommand() {
-    navigator.clipboard.writeText(enrollCommand()).then(() => {
+  function copyCommand() {
+    navigator.clipboard.writeText(command).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
@@ -190,79 +179,60 @@ function App() {
       </header>
 
       <section className="mx-auto max-w-5xl px-6 py-10 space-y-8">
+        {pending.length > 0 && (
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+            <p className="text-sm">
+              {pending.length} machine{pending.length === 1 ? "" : "s"} waiting for approval
+              <span className="ml-2 font-mono text-xs text-muted-foreground">
+                {pending.map((p) => p.userCode).join(", ")}
+              </span>
+            </p>
+            <Button size="sm" onClick={() => navigate("/enroll")}>
+              Review
+            </Button>
+          </div>
+        )}
+
         <Card>
           <CardHeader>
-            <CardTitle>Add Device (agent connects to server)</CardTitle>
+            <CardTitle>Add a machine</CardTitle>
             <CardDescription>
-              The remote machine dials into this server. Best for machines behind NAT or firewalls.
+              Create an auth key and run the command on the machine you want to add. It dials out to this server, so it
+              works behind NAT and firewalls.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {enrollmentToken ? (
+            {createdKey ? (
               <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">Run this command on the remote machine:</p>
+                <p className="text-sm text-muted-foreground">Run this on the machine you want to add:</p>
                 <div className="flex items-center gap-2">
-                  <code className="block flex-1 overflow-x-auto rounded-md bg-muted px-3 py-2 text-sm font-mono whitespace-nowrap">
-                    {enrollCommand()}
+                  <code className="block flex-1 overflow-x-auto whitespace-nowrap rounded-md bg-muted px-3 py-2 font-mono text-sm">
+                    {command}
                   </code>
-                  <Button variant="outline" size="sm" onClick={copyEnrollCommand}>
+                  <Button variant="outline" size="sm" onClick={copyCommand} aria-label="Copy command">
                     {copied ? <Check size={14} /> : <Copy size={14} />}
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Token expires at {new Date(enrollmentToken.expiresAt).toLocaleTimeString()}
+                  Single use, expires {new Date(createdKey.expiresAt).toLocaleDateString()}. This key is shown once —
+                  copy it now.
                 </p>
-                <Button variant="secondary" size="sm" onClick={() => setEnrollmentToken(null)}>
-                  Generate new token
+                <Button variant="secondary" size="sm" onClick={() => setCreatedKey(null)}>
+                  Done
                 </Button>
               </div>
             ) : (
-              <Button onClick={handleEnroll} disabled={isEnrolling}>
-                {isEnrolling ? "Generating..." : "Generate Enrollment Token"}
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Connect to agent (server connects to agent)</CardTitle>
-            <CardDescription>
-              This server reaches out to the agent. Use when the agent machine is directly reachable on the network.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form className="flex flex-col gap-3 md:flex-row" onSubmit={handleConnect}>
-              <div className="flex flex-1 flex-col gap-2">
-                <label className="text-sm font-medium" htmlFor="address">
-                  Agent WebSocket URL
-                </label>
-                <input
-                  id="address"
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                  placeholder="ws://10.0.0.12:8081/ws"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium" htmlFor="token">
-                  Token
-                </label>
-                <input
-                  id="token"
-                  className="w-48 rounded-md border bg-background px-3 py-2 text-sm"
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                />
-              </div>
-              <div className="flex items-end">
-                <Button type="submit" disabled={isConnecting}>
-                  {isConnecting ? "Connecting..." : "Connect"}
+              <div className="space-y-3">
+                <Button onClick={handleCreateAuthKey} disabled={isCreatingKey}>
+                  {isCreatingKey ? "Creating..." : "Create auth key"}
                 </Button>
+                {keyError && <p className="text-sm text-destructive">{keyError}</p>}
+                <p className="text-xs text-muted-foreground">
+                  No key handy? Run <code className="font-mono">spectre-agent up --host …</code> on the machine and
+                  approve the code it prints.
+                </p>
               </div>
-            </form>
+            )}
           </CardContent>
         </Card>
 
@@ -283,9 +253,6 @@ function App() {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <AgentStatusDot status={agent.status} />
-                      <Badge variant="secondary" className="capitalize">
-                        {agent.direction}
-                      </Badge>
                       {agent.agentVersion && (
                         <Badge variant="outline" className="font-mono text-[11px]">
                           {agent.agentVersion}

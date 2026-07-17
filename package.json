@@ -7,8 +7,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "pnpm --parallel --filter @spectre/server --filter @spectre/web-ui run dev",
-    "dev:server": "pnpm --filter @spectre/server run dev",
+    "dev": "SPECTRE_DEV_NO_AUTH=1 pnpm --parallel --filter @spectre/server --filter @spectre/web-ui run dev",
+    "dev:server": "SPECTRE_DEV_NO_AUTH=1 pnpm --filter @spectre/server run dev",
     "dev:web": "pnpm --filter @spectre/web-ui run dev",
     "dev:agent": "cd agent && AGENT_HOST=ws://localhost:8080 ./dev.sh",
     "build": "pnpm -r run build",

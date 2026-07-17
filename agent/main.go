@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -11,7 +10,6 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -27,48 +25,82 @@ func main() {
 	}
 }
 
+const hostFlagDoc = "Control server URL, e.g. wss://spectre.example.com"
+const authKeyFlagDoc = "Auth key from the Spectre UI (or $SPECTRE_AUTHKEY). Omit to approve this machine interactively."
+
+// resolveAuthKey prefers the flag but falls back to the environment.
+//
+// An auth key passed as a flag is visible in `ps` to every user on the machine
+// for as long as the process runs, so anything non-interactive should use the
+// environment instead.
+func resolveAuthKey(flagValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	return os.Getenv("SPECTRE_AUTHKEY")
+}
+
 func newRootCommand() *cobra.Command {
-	var listen, token, host, enroll string
+	var host, authKey string
 	cmd := &cobra.Command{
-		Use:          "spectre-agent",
-		Short:        "Run the Spectre agent server",
-		Long:         "Starts the Spectre agent API and WebSocket server for remote control connections.",
-		Example:      "spectre-agent --listen :8081 --host ws://host:8080 --enroll <token>",
+		Use:   "spectre-agent",
+		Short: "Connect this machine to a Spectre control server",
+		Long: "Runs the Spectre agent in the foreground.\n\n" +
+			"The agent dials out to the control server and never listens on a port,\n" +
+			"so it works behind NAT and firewalls.",
+		Example:      "  spectre-agent run --host wss://spectre.example.com --authkey sk_...",
 		SilenceUsage: true,
 		Args:         cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runAgent(listen, token, host, enroll)
+			return runAgent(host, resolveAuthKey(authKey))
 		},
 	}
+	cmd.Flags().StringVar(&host, "host", "", hostFlagDoc)
+	cmd.Flags().StringVar(&authKey, "authkey", "", authKeyFlagDoc)
 
-	cmd.Flags().StringVar(&listen, "listen", ":8081", "Address for the agent API and WebSocket server")
-	cmd.Flags().StringVar(&token, "token", "changeme", "Auth token for outbound connections from the control server")
-	cmd.Flags().StringVar(&host, "host", "", "Control server host (ws://host:port) to register with")
-	cmd.Flags().StringVar(&enroll, "enroll", "", "One-time enrollment token from the control server")
+	cmd.AddCommand(newRunCommand(), newUpCommand(), newDownCommand(), newStatusCommand())
+	return cmd
+}
 
-	cmd.AddCommand(newUpCommand(), newDownCommand(), newStatusCommand())
+func newRunCommand() *cobra.Command {
+	var host, authKey string
+	cmd := &cobra.Command{
+		Use:          "run",
+		Short:        "Run the agent in the foreground",
+		Example:      "  spectre-agent run --host wss://spectre.example.com --authkey sk_...",
+		SilenceUsage: true,
+		Args:         cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return runAgent(host, resolveAuthKey(authKey))
+		},
+	}
+	cmd.Flags().StringVar(&host, "host", "", hostFlagDoc)
+	cmd.Flags().StringVar(&authKey, "authkey", "", authKeyFlagDoc)
 	return cmd
 }
 
 func newUpCommand() *cobra.Command {
-	var listen, token, host, enroll string
+	var host, authKey string
 	cmd := &cobra.Command{
-		Use:          "up",
-		Short:        "Install and start spectre-agent as a service",
-		Long:         "Installs spectre-agent as a system service (systemd or launchd) and starts it with the provided flags.",
-		Example:      "spectre-agent up --listen :8081 --host ws://host:8080 --enroll <token>",
+		Use:   "up",
+		Short: "Enroll this machine and install it as a service",
+		Long: "Enrolls this machine with the control server and installs a systemd or\n" +
+			"launchd service so it reconnects on boot.\n\n" +
+			"With --authkey, enrollment is non-interactive. Without one, the agent\n" +
+			"prints a code to approve in the Spectre web UI.",
+		Example: "  sudo spectre-agent up --host wss://spectre.example.com --authkey sk_...\n" +
+			"  sudo spectre-agent up --host wss://spectre.example.com",
 		SilenceUsage: true,
 		Args:         cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return serviceUp(listen, token, host, enroll)
+			if host == "" {
+				return fmt.Errorf("--host is required (e.g. --host wss://spectre.example.com)")
+			}
+			return serviceUp(host, resolveAuthKey(authKey))
 		},
 	}
-
-	cmd.Flags().StringVar(&listen, "listen", ":8081", "Address for the agent API and WebSocket server")
-	cmd.Flags().StringVar(&token, "token", "changeme", "Auth token for outbound connections from the control server")
-	cmd.Flags().StringVar(&host, "host", "", "Control server host (ws://host:port) to register with")
-	cmd.Flags().StringVar(&enroll, "enroll", "", "One-time enrollment token from the control server")
-
+	cmd.Flags().StringVar(&host, "host", "", hostFlagDoc)
+	cmd.Flags().StringVar(&authKey, "authkey", "", authKeyFlagDoc)
 	return cmd
 }
 
@@ -77,24 +109,23 @@ func newDownCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "down",
 		Short:        "Stop and remove the spectre-agent service",
-		Long:         "Stops the spectre-agent service and removes it from the system service configuration.\nUse --purge to also remove device data (device key, lock file).",
-		Example:      "spectre-agent down\nspectre-agent down --purge",
+		Long:         "Stops the service and removes it.\nUse --purge to also delete this machine's device key.",
+		Example:      "  sudo spectre-agent down\n  sudo spectre-agent down --purge",
 		SilenceUsage: true,
 		Args:         cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return serviceDown(purge)
 		},
 	}
-	cmd.Flags().BoolVar(&purge, "purge", false, "Also remove device data (device key, enrollment state)")
+	cmd.Flags().BoolVar(&purge, "purge", false, "Also delete the device key and enrollment state")
 	return cmd
 }
 
 func newStatusCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:          "status",
-		Short:        "Show the status of the spectre-agent",
-		Long:         "Displays whether the agent is running, its PID, device ID, and enrollment state.",
-		Example:      "spectre-agent status",
+		Short:        "Show whether the agent is running and enrolled",
+		Example:      "  spectre-agent status",
 		SilenceUsage: true,
 		Args:         cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -110,7 +141,6 @@ func showStatus() error {
 	if running && info != nil {
 		fmt.Printf("  Status:    running (pid %d)\n", info.PID)
 		fmt.Printf("  Agent ID:  %s\n", info.AgentID)
-		fmt.Printf("  Listen:    %s\n", info.Listen)
 		if info.Host != "" {
 			fmt.Printf("  Server:    %s\n", info.Host)
 		}
@@ -122,22 +152,19 @@ func showStatus() error {
 	if err == nil {
 		fmt.Printf("  Device ID: %s\n", deviceInfo.DeviceID)
 		if deviceInfo.DeviceKey != "" {
-			fmt.Printf("  Enrolled:  yes\n")
+			fmt.Println("  Enrolled:  yes")
 		} else {
-			fmt.Printf("  Enrolled:  no\n")
+			fmt.Println("  Enrolled:  no")
 		}
 	}
 
-	path, _ := deviceInfoPath()
-	if path != "" {
+	if path, _ := deviceInfoPath(); path != "" {
 		fmt.Printf("  Data dir:  %s\n", filepath.Dir(path))
 	}
 
-	svcStatus := serviceStatus()
-	if svcStatus != "" {
+	if svcStatus := serviceStatus(); svcStatus != "" {
 		fmt.Printf("  Service:   %s\n", svcStatus)
 	}
-
 	return nil
 }
 
@@ -187,27 +214,23 @@ func handleCommandError(cmd *cobra.Command, err error) {
 		cmd.PrintErrf("\nRun '%s --help' for usage.\n", cmd.CommandPath())
 		return
 	}
-
 	cmd.PrintErrf("Run '%s --help' for usage.\n", cmd.CommandPath())
 }
 
-func runAgent(listen, token, host, enrollToken string) error {
+func runAgent(host, authKey string) error {
+	if host == "" {
+		return fmt.Errorf("--host is required (e.g. --host wss://spectre.example.com)")
+	}
+
 	deviceInfo, err := ensureDeviceInfo()
 	if err != nil {
 		return fmt.Errorf("failed to load device id: %w", err)
 	}
 
-	fingerprint := collectFingerprint()
-	agentID := deviceInfo.DeviceID
-	connectionURL := buildConnectionURL(listen)
-
 	instance := AgentInstanceInfo{
-		PID:           os.Getpid(),
-		AgentID:       agentID,
-		Listen:        listen,
-		ConnectionURL: connectionURL,
-		Host:          host,
-		Token:         token,
+		PID:     os.Getpid(),
+		AgentID: deviceInfo.DeviceID,
+		Host:    host,
 	}
 
 	acquired, running, err := ensureSingleInstance(instance)
@@ -215,45 +238,21 @@ func runAgent(listen, token, host, enrollToken string) error {
 		return fmt.Errorf("failed to check agent instance: %w", err)
 	}
 	if !acquired && running != nil {
-		log.Printf("spectre-agent already running (pid %d)", running.PID)
-		log.Printf("agent id: %s", running.AgentID)
-		log.Printf("control server can connect via: %s", running.ConnectionURL)
-		return nil
+		return fmt.Errorf("spectre-agent is already running (pid %d)", running.PID)
 	}
 	defer func() {
 		if err := releaseSingleton(instance.PID); err != nil {
-			log.Printf("warning: failed to release agent lock: %v", err)
+			fmt.Fprintf(os.Stderr, "warning: failed to release agent lock: %v\n", err)
 		}
 	}()
 
-	server := newAgentServer(listen, token, agentID, fingerprint)
-
-	if host != "" {
-		go connectToControlServer(host, token, enrollToken, &deviceInfo, fingerprint)
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- server.start()
-	}()
+	fingerprint := collectFingerprint()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	select {
-	case err := <-errCh:
-		return err
-	case <-ctx.Done():
-	}
+	go connectToControlServer(host, authKey, &deviceInfo, fingerprint)
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := server.shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("server shutdown error: %w", err)
-	}
-
-	if err := <-errCh; err != nil {
-		return fmt.Errorf("server error: %w", err)
-	}
+	<-ctx.Done()
 	return nil
 }

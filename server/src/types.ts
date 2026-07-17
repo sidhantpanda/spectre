@@ -1,5 +1,4 @@
 export type AgentStatus = "connecting" | "connected" | "disconnected";
-export type AgentDirection = "inbound" | "outbound";
 
 export interface AgentFingerprint {
   hostname: string;
@@ -39,8 +38,6 @@ export interface AgentRecord {
   deviceId?: string;
   agentVersion?: string;
   fingerprint?: AgentFingerprint;
-  remoteAgentId?: string;
-  direction: AgentDirection;
   docker?: DockerContainer[];
   dockerError?: string;
   systemInfo?: SystemInfo;
@@ -49,14 +46,18 @@ export interface AgentRecord {
   networkInfoError?: string;
 }
 
+/** Server to agent. */
 export type ControlMessage =
-  | { type: "hello"; token: string; deviceKey?: string }
+  | { type: "hello" }
+  /** Handed to an agent that connected with an auth key; carries its device key. */
+  | { type: "enrolled"; deviceKey: string }
   | { type: "keystroke"; data: string; sessionId?: string }
   | { type: "reset"; sessionId?: string }
   | { type: "dockerInfo" }
   | { type: "systemInfo" }
   | { type: "networkInfo" };
 
+/** Agent to server. */
 export type AgentMessage =
   | { type: "hello"; agentId: string; fingerprint: AgentFingerprint; agentVersion?: string }
   | { type: "output"; data: string; sessionId?: string }

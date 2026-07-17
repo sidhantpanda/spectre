@@ -5,7 +5,7 @@ import { AgentTerminal } from "../components/AgentTerminal";
 import { AgentStatusDot } from "../components/AgentStatusDot";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { VersionFooter } from "../components/VersionFooter";
-import { Agent, fetchAgents, subscribeToAgentEvents } from "../state/agents";
+import { Agent, type AgentEventSubscription, fetchAgents, subscribeToAgentEvents } from "../state/agents";
 import { getApiBase } from "../lib/api";
 
 const API_BASE = getApiBase();
@@ -18,19 +18,13 @@ export default function TerminalPage() {
 
   useEffect(() => {
     let mounted = true;
-    let socket: WebSocket | null = null;
+    let subscription: AgentEventSubscription | null = null;
     let retryTimer: number | null = null;
     let backoff = 1000;
 
     const cleanupSocket = () => {
-      if (socket) {
-        socket.onopen = null;
-        socket.onclose = null;
-        socket.onerror = null;
-        socket.onmessage = null;
-        socket.close();
-        socket = null;
-      }
+      subscription?.close();
+      subscription = null;
     };
 
     const scheduleRetry = () => {
@@ -47,7 +41,7 @@ export default function TerminalPage() {
     const connectEvents = () => {
       if (!mounted) return;
       cleanupSocket();
-      const ws = subscribeToAgentEvents(
+      subscription = subscribeToAgentEvents(
         (agentList) => mounted && setAgents(agentList),
         (agent) => {
           if (!mounted) return;
@@ -63,25 +57,24 @@ export default function TerminalPage() {
           });
         },
         API_BASE,
+        {
+          onOpen: () => {
+            backoff = 1000;
+            setLoadError(null);
+            fetchAgents(API_BASE)
+              .then((list) => {
+                if (!mounted) return;
+                setAgents(list);
+              })
+              .catch(() => {
+                if (!mounted) return;
+                scheduleRetry();
+              });
+          },
+          onError: scheduleRetry,
+          onClose: scheduleRetry,
+        },
       );
-      socket = ws;
-
-      ws.onopen = () => {
-        backoff = 1000;
-        setLoadError(null);
-        fetchAgents(API_BASE)
-          .then((list) => {
-            if (!mounted) return;
-            setAgents(list);
-          })
-          .catch(() => {
-            if (!mounted) return;
-            scheduleRetry();
-          });
-      };
-
-      ws.onerror = scheduleRetry;
-      ws.onclose = scheduleRetry;
     };
 
     fetchAgents(API_BASE)
@@ -109,7 +102,7 @@ export default function TerminalPage() {
 
   const agent = useMemo(() => agents.find((a) => a.id === id), [agents, id]);
   const currentId = agent?.id ?? id ?? "";
-  const displayId = agent ? agent.deviceId ?? agent.remoteAgentId ?? agent.id : id ?? "";
+  const displayId = agent ? agent.deviceId ?? agent.id : id ?? "";
 
   return (
     <main className="min-h-screen bg-background text-foreground">

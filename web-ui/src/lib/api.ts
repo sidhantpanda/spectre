@@ -1,4 +1,4 @@
-import { getStoredToken } from "./auth";
+import { authFetch } from "./auth";
 
 const RUNTIME_BASE =
   typeof window !== "undefined" &&
@@ -17,13 +17,23 @@ export function getApiBase() {
   return ENV_BASE ?? window.location.origin;
 }
 
-export function buildWsUrl(path: string, apiBase?: string) {
+/**
+ * Builds an authenticated WebSocket URL.
+ *
+ * A browser cannot set headers on a WebSocket handshake, so the session token
+ * would otherwise have to ride in the query string, where it lands in proxy and
+ * access logs and survives long after the page is closed. Instead the session
+ * is exchanged for a single-use ticket that expires in seconds.
+ */
+export async function buildWsUrl(path: string, apiBase?: string): Promise<string> {
   const base = apiBase && apiBase.length > 0 ? apiBase : getApiBase();
   const url = new URL(path, base);
   url.protocol = url.protocol.replace("http", "ws");
-  const token = getStoredToken();
-  if (token) {
-    url.searchParams.set("authToken", token);
+
+  const res = await authFetch(`${base}/auth/ws-ticket`, { method: "POST" });
+  if (res.ok) {
+    const { ticket } = (await res.json()) as { ticket?: string };
+    if (ticket) url.searchParams.set("ticket", ticket);
   }
   return url.toString();
 }

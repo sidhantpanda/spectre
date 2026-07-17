@@ -6,6 +6,7 @@ start, see the [root README](../README.md).
 ## Contents
 
 - [How it works](#how-it-works)
+- [Production checklist](#production-checklist)
 - [Development](#development)
 - [The agent](#the-agent)
 - [The server](#the-server)
@@ -15,38 +16,51 @@ start, see the [root README](../README.md).
 
 ## How it works
 
-The agent dials out to the server over WebSocket (works through NAT and firewalls). The browser connects to the server, which bridges terminal I/O. If **tmux** is installed on the remote machine, sessions persist across browser disconnects and network drops.
+The agent dials out to the server over a WebSocket and **never listens on a port**. The browser connects to the server, and the server bridges terminal I/O between the two. If **tmux** is installed on the remote machine, sessions persist across browser disconnects and network drops.
 
 ```
-Browser ◄──── WebSocket ────► Server ◄──── WebSocket ────► Agent (+ tmux)
+┌───────────┐   /terminal WS    ┌─────────────────┐   /agents/register WS   ┌───────────────┐
+│  Browser  │ ◄───────────────► │  Control Server │ ◄─────────────────────► │     Agent     │
+│ (xterm.js)│   ticket auth     │    (Node.js)    │   device key auth       │  (+ tmux) Go  │
+└───────────┘                   └─────────────────┘                         └───────────────┘
+                                         │                                    dials out only,
+                                         ▼                                    no open ports
+                                    store.json
+                              (hashed keys, at rest)
 ```
 
-Two connection directions are supported:
+Because the connection is always agent → server, Spectre works through NAT, CGNAT, and outbound-only firewalls, and there is no listening service to attack on the machines you connect to.
 
-- **Agent dials server** (inbound) — NAT-friendly, the default. The agent reaches out and registers.
-- **Server dials agent** (outbound) — for agents directly reachable on the same LAN.
+### Enrollment
 
-```
-┌───────────┐    /terminal WS    ┌─────────────────┐
-│  Browser  │ ◄────────────────► │  Control Server │
-│ (xterm.js)│                    │    (Node.js)    │
-└───────────┘                    └────────┬────────┘
-                                          │
-                        ┌─────────────────┴─────────────────┐
-                        │                                   │
-                        ▲ inbound                           ▼ outbound
-                (agent dials in)                   (server dials out)
-                        │                                   │
-                ┌───────────────┐                   ┌───────────────┐
-                │    Agent A    │                   │    Agent B    │
-                │   behind NAT  │                   │  on local LAN │
-                └───────────────┘                   └───────────────┘
-```
+A machine is only trusted once you say so. There are two ways to say it:
+
+| | Auth key | Interactive approval |
+|---|---|---|
+| Command | `spectre-agent up --host … --authkey sk_…` | `spectre-agent up --host …` |
+| Good for | scripts, cloud-init, golden images | adding a machine by hand |
+| How it works | key is redeemed on connect and exchanged for a device key | agent prints a code; an admin approves it in the UI |
+| Default lifetime | single use, 90 days | 15 minutes |
+
+Both end in the same place: the machine holds a long-lived **device key**, and the enrollment credential is spent. The device key is stored `0600` on the machine and only ever as a hash on the server.
+
+## Production checklist
+
+Spectre gives a browser a root shell. Before exposing it:
+
+- [ ] **Set a real `ADMIN_PASSWORD`** (`openssl rand -base64 24`). The server refuses to start without one.
+- [ ] **Terminate TLS** in front of the server and use `wss://` for agents. The supplied Compose file publishes only the UI's port, so it is the single place to add TLS.
+- [ ] **Never set `SPECTRE_DEV_NO_AUTH`.** It is refused outright when `NODE_ENV=production`.
+- [ ] **Back up `DATA_DIR`.** Losing `store.json` means re-enrolling every machine.
+- [ ] **Set `TRUST_PROXY=1` only if** a proxy you control sets `X-Forwarded-For`. Otherwise the login rate limiter can be bypassed by forging the header.
+- [ ] **Revoke machines you no longer own** in the UI. Revocation kills the live session immediately.
+- [ ] Prefer **single-use auth keys**. Reusable keys enrol unlimited machines until they expire or are revoked.
+
+There is currently **one admin and no per-machine access control**: anyone with the password can shell into every enrolled machine.
 
 ## Development
 
-The `server` (API) and `web-ui` (web) live in a single **pnpm workspace**. The
-`agent` is a separate Go module.
+The `server` (API) and `web-ui` live in a single **pnpm workspace**. The `agent` is a separate Go module.
 
 Prerequisites: **Node 20+**, **pnpm 11+**, and **Go 1.21+** (only for the agent).
 
@@ -55,7 +69,7 @@ pnpm install     # install workspace deps (once)
 pnpm dev         # run the API (:8080) and web UI (:5173) together
 ```
 
-Open `http://localhost:5173`. The web UI dev server proxies `/agents`, `/terminal`, `/auth`, `/devices`, and `/version` to the API on `:8080`, so there's no CORS setup.
+Open `http://localhost:5173`. The Vite dev server proxies the API to `:8080`, so there's no CORS setup. `pnpm dev` sets `SPECTRE_DEV_NO_AUTH=1`, so there's no login screen in development.
 
 ### Root scripts
 
@@ -64,12 +78,12 @@ Open `http://localhost:5173`. The web UI dev server proxies `/agents`, `/termina
 | `pnpm dev` | Run server + web UI in parallel (preferred dev route) |
 | `pnpm dev:server` | Run only the API (:8080) |
 | `pnpm dev:web` | Run only the web UI (:5173) |
-| `pnpm dev:agent` | Run the Go agent against `ws://localhost:8080` with auto-reload |
+| `pnpm dev:agent` | Enrol and run the Go agent against `ws://localhost:8080` with auto-reload |
 | `pnpm build` | Build every package |
 | `pnpm test` | Test every package |
 | `pnpm lint` | Type-check the web UI |
 
-Target a single package directly with `pnpm --filter @spectre/server <script>` or `pnpm --filter @spectre/web-ui <script>`.
+Target a single package with `pnpm --filter @spectre/server <script>` or `pnpm --filter @spectre/web-ui <script>`.
 
 ### The agent in development
 
@@ -77,26 +91,27 @@ The agent needs a running server. In one terminal run `pnpm dev`; in another:
 
 ```bash
 pnpm dev:agent
-# equivalent to: cd agent && AGENT_HOST=ws://localhost:8080 ./dev.sh
 ```
 
-`agent/dev.sh` auto-reloads on file changes using `watchexec` or `entr` if available, otherwise it falls back to polling. It connects with the default legacy token (`changeme`), so the agent shows up in the web UI without enrollment.
+`agent/dev.sh` mints an auth key from the dev server and enrols with it, so the dev loop exercises the same enrollment path as production. Once enrolled, the stored device key is reused on every restart. It auto-reloads on file changes using `watchexec` or `entr` if available, otherwise it polls.
+
+To start over from an unenrolled state, delete `~/.spectre-agent`.
 
 ### Docker Compose (alternative)
 
-`pnpm dev` is the preferred route. If you'd rather run the server and web UI in containers:
+`pnpm dev` is the faster inner loop. To test the built images:
 
 ```bash
-docker compose -f compose.dev.yaml up -d --build   # server + web UI (built from source)
-docker compose -f compose.dev.yaml logs -f server   # view logs
-docker compose -f compose.dev.yaml down             # tear down
+docker compose -f compose.dev.yaml up -d --build
+docker compose -f compose.dev.yaml logs -f server
+docker compose -f compose.dev.yaml down
 ```
 
-Web UI: `http://localhost:3000` | API: `http://localhost:8080`.
+Web UI: `http://localhost:3000` (which proxies the API on the same origin).
 
 ## The agent
 
-The agent is a single self-contained Go binary. Getting it running is two steps: put the binary on the machine, then connect it to the server (usually as a background service).
+A single self-contained Go binary. Put it on the machine, then enrol it.
 
 ### Install the binary
 
@@ -106,7 +121,7 @@ The agent is a single self-contained Go binary. Getting it running is two steps:
 curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh | sudo bash
 ```
 
-**Option B — build it yourself and copy it over.** Useful when there is no published release, or the target is on your LAN (e.g. a home server). Match `GOOS`/`GOARCH` to the target machine:
+**Option B — build it yourself.** Useful when there's no published release for your target. Match `GOOS`/`GOARCH` to the target machine:
 
 ```bash
 # On your dev machine, from agent/:
@@ -124,31 +139,21 @@ sudo install -m 0755 /tmp/spectre-agent /usr/local/bin/spectre-agent
 | `darwin` | `arm64` | Apple Silicon Mac |
 | `windows` | `amd64` | Windows (`-o spectre-agent.exe`) |
 
-### Connect to the server
-
-**Agent dials server (inbound, NAT-friendly) — recommended.** Generate an enrollment token in the web UI, then:
+### Enrol and run
 
 ```bash
-sudo spectre-agent up --host wss://server.example.com --enroll <token>
+# With an auth key from the UI (non-interactive):
+sudo spectre-agent up --host wss://spectre.example.com --authkey sk_...
+
+# Or interactively — prints a code to approve in the UI:
+sudo spectre-agent up --host wss://spectre.example.com
 ```
 
-The agent enrolls, stores a permanent device key, installs itself as a service, and starts. The enrollment token is one-time use; subsequent restarts reuse the stored key.
+`up` enrols the machine, stores the device key, installs a service, and starts it. The enrollment credential is never written into the service file: the agent enrols once, up front, and the service runs with only `--host`.
 
-> Without `--enroll`, the agent falls back to a shared **legacy token** (`--token`, default `changeme`, which must match the server's `AGENT_AUTH_TOKEN`). That's fine for a quick LAN test but insecure for anything exposed — use enrollment and set a strong `AGENT_AUTH_TOKEN` instead.
-
-**Server dials agent (outbound, same LAN).** When the agent machine is directly reachable, the server can dial it instead:
-
-```bash
-sudo spectre-agent up --listen :8081 --token mysecret
-```
-
-Then in the web UI, use the **Connect to agent** form with `ws://<agent-ip>:8081/ws` and the token.
-
-> **TLS:** put a reverse proxy in front of the server and use `wss://` instead of `ws://`.
+> **TLS:** a bare host (`--host spectre.example.com`) defaults to `wss://`. Plaintext `ws://` to anything other than localhost logs a loud warning — terminal I/O and the device key would be exposed to the network.
 
 ### Run as a daemon
-
-`spectre-agent up` installs and starts a service that runs the agent in the background and restarts it automatically:
 
 | | Linux (systemd) | macOS (launchd) |
 |---|---|---|
@@ -156,56 +161,44 @@ Then in the web UI, use the **Connect to agent** form with `ws://<agent-ip>:8081
 | View logs | `journalctl -u spectre-agent -f` | `tail -f /var/log/spectre-agent.log` |
 | Device data | `/var/lib/spectre-agent/` | `/var/lib/spectre-agent/` |
 
-Enrollment (`--enroll`) is never written into the service file — the agent enrolls once, stores a device key, and reuses it on every restart.
-
-> **No root / can't install a service?** Run the binary directly — it only writes to `~/.spectre-agent` and needs no privileges:
+> **No root / can't install a service?** Run it directly — it only writes to `~/.spectre-agent` and needs no privileges:
 > ```bash
-> setsid spectre-agent --host ws://<server-ip>:8080 >~/spectre-agent.log 2>&1 &
+> setsid spectre-agent run --host wss://spectre.example.com --authkey sk_... >~/spectre-agent.log 2>&1 &
 > ```
-> It registers exactly like the service, and if tmux is installed sessions still persist. The only difference is it won't survive a reboot. (`nohup ... &` works too; plain `&` without `setsid`/`nohup` stops when you log out.)
+> It enrols exactly like the service and tmux sessions still persist; it just won't survive a reboot.
 
 ### Commands and flags
 
 ```bash
-spectre-agent status             # running state, pid, device id, service status
-sudo spectre-agent up --host ... # install as a service and start
-sudo spectre-agent down          # stop and remove the service
-sudo spectre-agent down --purge  # also delete device key and data
-spectre-agent                    # run in the foreground (Ctrl+C to stop)
+spectre-agent status              # running state, pid, device id, service status
+sudo spectre-agent up --host ...  # enrol, install as a service, and start
+sudo spectre-agent down           # stop and remove the service
+sudo spectre-agent down --purge   # also delete the device key
+spectre-agent run --host ...      # run in the foreground (Ctrl+C to stop)
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--host` | | Control server URL (`ws://` or `wss://`) |
-| `--enroll` | | One-time enrollment token from the web UI |
-| `--listen` | `:8081` | Address for the local WebSocket server (server-dials-agent) |
-| `--token` | `changeme` | Legacy/outbound token the server must present |
+| Flag | Description |
+|------|-------------|
+| `--host` | Control server URL. Required. `wss://host` (or a bare host, which defaults to TLS) |
+| `--authkey` | Auth key from the UI. Omit to approve the machine interactively |
 
 ### Uninstall
-
-Full removal — stops the service and deletes the binary, data directories, and lock file:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/uninstall-agent.sh | sudo bash
 ```
 
-Or, if you only installed the service, remove it and its data (this leaves the binary in place):
+Or, to remove just the service and its data (leaving the binary):
 
 ```bash
 sudo spectre-agent down --purge
 ```
 
-If you ran the agent directly without installing a service (the no-root path above), there is no service to remove — just stop the process and delete its files:
-
-```bash
-pkill -f 'spectre-agent --host'          # stop the process
-rm -f /usr/local/bin/spectre-agent       # or wherever you put it
-rm -rf ~/.spectre-agent                  # device key and state
-```
+Revoking the machine in the web UI is what actually cuts off access — uninstalling only stops the agent from reconnecting.
 
 ### Persistent sessions via tmux
 
-When tmux is installed on the remote machine, the agent wraps each terminal in a tmux session named `spectre`. Close the tab and reopen it — you're back where you left off, and multiple tabs share the same session. This survives browser disconnects, WebSocket drops, and server restarts. Without tmux, sessions are ephemeral (lost on disconnect).
+When tmux is installed, the agent wraps each terminal in a tmux session named `spectre`. Close the tab and reopen it and you're back where you left off; multiple tabs share the session. This survives browser disconnects, WebSocket drops, and server restarts. Without tmux, sessions are ephemeral.
 
 ```bash
 sudo apt install tmux    # Debian/Ubuntu
@@ -215,48 +208,73 @@ brew install tmux        # macOS
 
 ### Data storage
 
-- Device ID and key: `~/.spectre-agent/device-info.json` (or `/var/lib/spectre-agent/` when running as a service)
-- Lock file: `/tmp/spectre-agent.lock` (prevents duplicate instances)
+- Device ID and key: `~/.spectre-agent/device-info.json`, mode `0600` (or `/var/lib/spectre-agent/` as a service)
+- Lock file: `/tmp/spectre-agent.lock` (prevents duplicate instances; contains no secrets)
 
 ## The server
 
-Node.js + TypeScript control plane that relays terminal sessions between browser clients and remote agents.
+Node.js + TypeScript control plane that relays terminal sessions between browsers and agents.
 
 ### Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ADMIN_PASSWORD` | *(empty)* | Web UI password. Empty = no auth |
+| `ADMIN_PASSWORD` | *(none)* | **Required.** Web UI password, min 12 chars. The server refuses to start without it |
+| `SPECTRE_DEV_NO_AUTH` | | Set to `1` to disable auth for local development. Fatal when `NODE_ENV=production` |
 | `PORT` | `8080` | HTTP/API port |
-| `DATA_DIR` | `./data` | Persistent device store (JSON file) |
-| `AGENT_AUTH_TOKEN` | `changeme` | Legacy shared token for agents connecting without enrollment |
-| `CORS_ORIGIN` | `*` | Allowed CORS origins (comma-separated) |
+| `DATA_DIR` | `./data` | Device store location (`store.json`, written `0600`) |
+| `CORS_ORIGIN` | *(empty)* | Comma-separated allowed origins. Empty = no cross-origin access |
+| `TRUST_PROXY` | | Set to `1` only behind a proxy that sets `X-Forwarded-For` |
+| `SPECTRE_DEBUG_TERMINAL` | | Set to `1` to log terminal output summaries. Off by default: output contains what the user typed |
 
-When `ADMIN_PASSWORD` is set, all API endpoints except `/auth/*` and `/version` require an `Authorization: Bearer <token>` header (obtained from `POST /auth/login`).
+### Authentication
+
+- **Browser → server:** `POST /auth/login` with the password returns a session token, sent as `Authorization: Bearer <token>`. Sessions idle out after 24h and expire absolutely after 7 days. Repeated failed logins lock out the client.
+- **Browser → WebSocket:** browsers can't set headers on a WebSocket handshake, so the session is exchanged via `POST /auth/ws-ticket` for a single-use ticket valid for 30 seconds, passed as `?ticket=`. Session tokens are never accepted in a URL.
+- **Agent → server:** `Authorization: Bearer <device key | auth key>` on the handshake. Agents are authenticated before the WebSocket is established.
 
 ### HTTP API
 
+Public:
+
 | Endpoint | Description |
 |----------|-------------|
-| `GET /auth/status` | Returns `{ authEnabled: true/false }` |
-| `POST /auth/login` | Body `{ "password": "..." }` → `{ "token": "..." }` |
+| `GET /healthz` | Liveness probe |
 | `GET /version` | Server version |
-| `GET /agents` | List agents with status, system info, Docker containers |
-| `POST /agents/connect` | Server dials an agent. Body `{ "address": "ws://ip:8081/ws", "token": "..." }` |
-| `POST /agents/:id/command` | Push keystrokes. Body `{ "data": "ls\n" }` |
-| `POST /agents/refresh-docker` | Re-fetch Docker info from all agents |
-| `POST /agents/refresh-system` | Re-fetch system info from all agents |
-| `POST /agents/refresh-network` | Re-fetch network info from all agents |
-| `POST /devices/enroll` | Create an enrollment token → `{ "token": "...", "expiresAt": ... }` |
-| `GET /devices` | List enrolled devices |
+| `GET /auth/status` | `{ authEnabled: true/false }` |
+| `POST /auth/login` | `{ "password": "..." }` → `{ "token": "..." }`. Rate limited |
+| `POST /devices/approval-request` | Agent asks to be approved → `{ userCode, pollToken, expiresAt }`. Rate limited |
+| `POST /devices/approval-poll` | Agent polls → `{ status: "pending" \| "approved" \| "expired", deviceKey? }`. Rate limited |
 
-WebSocket endpoints:
+Requires `Authorization: Bearer <session token>`:
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /auth/logout` | Invalidate the current session |
+| `POST /auth/ws-ticket` | → `{ ticket }` for a WebSocket upgrade |
+| `GET /agents` | List agents with status, system info, Docker containers |
+| `POST /agents/:id/command` | Push keystrokes. `{ "data": "ls\n" }` |
+| `POST /agents/refresh-docker` \| `-system` \| `-network` | Re-fetch info from all agents |
+| `POST /authkeys` | Create an auth key. `{ reusable?, expiresInMs?, description? }` → `{ key, ... }`. **The plaintext key is returned only here** |
+| `GET /authkeys` | List auth keys (hints only, never the key) |
+| `DELETE /authkeys/:id` | Revoke an auth key |
+| `GET /devices` | List enrolled devices. Never includes key material |
+| `DELETE /devices/:id` | Revoke a device and drop its live connection |
+| `GET /devices/pending` | Machines waiting for approval |
+| `POST /devices/pending/:userCode/approve` | Approve a machine. `{ name? }` |
+| `POST /devices/pending/:userCode/deny` | Deny and discard the request |
+
+WebSocket:
 
 | Path | Auth | Description |
 |------|------|-------------|
-| `WS /terminal?id=<agentId>` | UI session token | Browser terminal I/O |
-| `WS /agents/events` | UI session token | Live agent status stream |
-| `WS /agents/register` | Device key, enrollment token, or legacy token | Agent registration |
+| `WS /terminal?id=<agentId>&ticket=<t>` | Single-use ticket | Browser terminal I/O |
+| `WS /agents/events?ticket=<t>` | Single-use ticket | Live agent status stream |
+| `WS /agents/register` | `Authorization: Bearer <device key \| auth key>` | Agent registration |
+
+### Device store
+
+`store.json` holds device records, auth keys, and pending approvals. All credentials are stored as **SHA-256 hashes** — reading the file is not enough to impersonate a device or enrol a new one. Since these are high-entropy random tokens rather than passwords, a fast hash is appropriate; there is nothing to brute-force. The file is written `0600` via write-then-rename.
 
 ## Docker images
 
@@ -267,39 +285,44 @@ docker build -f server/Dockerfile -t spectre-server .
 docker build -f web-ui/Dockerfile -t spectre-web-ui .
 ```
 
-The server image uses `pnpm deploy` to produce a self-contained, production-only `node_modules`; the web UI image builds the static bundle and serves it with nginx. A root `.dockerignore` keeps the build context small.
+The server image uses `pnpm deploy` to produce a self-contained production-only `node_modules`. The web UI image builds the static bundle, serves it with nginx, and **proxies the API on the same origin** (`SPECTRE_SERVER_UPSTREAM`, default `server:8080`) — which is why no CORS configuration is needed and only one port is published.
 
 ## Releases
 
-Everything ships from **one tag**. Push a single `v*` tag (e.g. `v1.2.3`) and the `Release` workflow:
+Everything ships from **one tag**. Push a `v*` tag (e.g. `v1.2.3`) and the `Release` workflow:
 
 1. builds + pushes the **server** image to `ghcr.io/sidhantpanda/spectre/server`,
 2. builds + pushes the **web-ui** image to `ghcr.io/sidhantpanda/spectre/web-ui`,
 3. cross-compiles the **agent** binaries (linux/darwin, amd64/arm64), and
-4. publishes a single **GitHub release** for the tag with the agent binaries attached.
+4. publishes a **GitHub release** for the tag with the agent binaries attached.
 
 ```bash
 git tag v1.2.3
 git push origin v1.2.3
 ```
 
-Images are tagged with the full version plus `major.minor`, `major`, `latest`, and the commit SHA. The install script (`install-agent.sh`) downloads the agent from the latest `v*` release.
+Images are tagged with the full version plus `major.minor`, `major`, `latest`, and the commit SHA. The install script downloads the agent from the latest `v*` release.
 
-Running the workflow manually (Actions tab → Release → *Run workflow*) builds all the same artifacts from the current commit — images tagged with the commit SHA — but does not publish a GitHub release or move the `latest` tag.
+> The release does not yet publish checksums, and `install-agent.sh` does not verify the download. Anyone who can tamper with the release assets or the connection can run code as root on machines that install the agent. This is the top open item before a wide release.
+
+Running the workflow manually (Actions tab → Release → *Run workflow*) builds the same artifacts from the current commit, tagged with the SHA, without publishing a release or moving `latest`.
 
 ## Protocol reference
 
-Messages are JSON. The agent speaks:
+Messages are JSON.
 
 | Direction | Type | Description |
 |-----------|------|-------------|
-| Agent → Server | `hello` | Handshake with agent ID, fingerprint, version |
+| Agent → Server | `hello` | Handshake with device ID, fingerprint, version |
 | Agent → Server | `output` | PTY output chunks |
 | Agent → Server | `heartbeat` | Sent every 25s for liveness |
 | Agent → Server | `dockerInfo` | Docker container list |
 | Agent → Server | `systemInfo` | OS, CPU, memory, disk, tmuxAvailable |
 | Agent → Server | `networkInfo` | IPv4/IPv6 addresses |
-| Server → Agent | `hello` | Handshake response (with device key on enrollment) |
-| Server → Agent | `keystroke` | Terminal input from browser |
-| Server → Agent | `reset` | Attach to existing tmux session or start a new shell |
+| Server → Agent | `hello` | Handshake response |
+| Server → Agent | `enrolled` | Issues the device key after an auth key is redeemed |
+| Server → Agent | `keystroke` | Terminal input from the browser |
+| Server → Agent | `reset` | Attach to an existing tmux session or start a shell |
 | Server → Agent | `dockerInfo` / `systemInfo` / `networkInfo` | Request the corresponding info |
+
+The server drops agent messages larger than 256 KB and browser messages larger than 64 KB.

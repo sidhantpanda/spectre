@@ -7,14 +7,14 @@ import (
 	"path/filepath"
 )
 
+// AgentInstanceInfo is written to a lock file readable by anyone on the host,
+// so it carries only non-sensitive identifiers. Credentials live in the device
+// info file, which is not world-readable.
 type AgentInstanceInfo struct {
-	PID           int    `json:"pid"`
-	AgentID       string `json:"agentId"`
-	Listen        string `json:"listen"`
-	ConnectionURL string `json:"connectionUrl"`
-	Host          string `json:"host,omitempty"`
-	Token         string `json:"token"`
-	lockFilePath  string
+	PID          int    `json:"pid"`
+	AgentID      string `json:"agentId"`
+	Host         string `json:"host,omitempty"`
+	lockFilePath string
 }
 
 func lockFilePath() string {

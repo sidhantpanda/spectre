@@ -33,6 +33,16 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      "/authkeys": {
+        target: CONTROL_SERVER_TARGET,
+        changeOrigin: true,
+        secure: false,
+      },
+      "/healthz": {
+        target: CONTROL_SERVER_TARGET,
+        changeOrigin: true,
+        secure: false,
+      },
       "/version": {
         target: CONTROL_SERVER_TARGET,
         changeOrigin: true,

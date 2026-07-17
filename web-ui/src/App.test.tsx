@@ -64,15 +64,27 @@ describe("App component", () => {
     expect(screen.getByText(/No connections yet/i)).toBeInTheDocument();
   });
 
-  it("submits connection details", async () => {
+  it("creates an auth key and shows the enrollment command", async () => {
     const fetchMock = globalThis.fetch as unknown as Mock;
-    const responses = [
-      Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
-      Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
-      Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
-    ];
-    const fallback = Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-    fetchMock.mockImplementation(() => (responses.shift() ?? fallback) as Promise<Response>);
+    fetchMock.mockImplementation((url: string) => {
+      if (url === `${window.location.origin}/authkeys`) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              id: "key-1",
+              key: "sk_testkey123",
+              hint: "sk_test",
+              reusable: false,
+              createdAt: Date.now(),
+              expiresAt: Date.now() + 1000,
+              uses: 0,
+              revoked: false,
+            }),
+        }) as unknown as Promise<Response>;
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) }) as unknown as Promise<Response>;
+    });
 
     render(
       <ThemeProvider>
@@ -82,28 +94,42 @@ describe("App component", () => {
       </ThemeProvider>,
     );
 
-    const addressInput = screen.getByLabelText(/Agent WebSocket URL/i);
-    fireEvent.change(addressInput, { target: { value: "ws://test/ws" } });
-    const tokenInput = screen.getByLabelText(/Token/i);
-    fireEvent.change(tokenInput, { target: { value: "secret" } });
+    fireEvent.click(screen.getByRole("button", { name: /create auth key/i }));
 
-    const submit = screen.getByRole("button", { name: /connect/i });
-    fireEvent.click(submit);
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => url === `${window.location.origin}/authkeys`)).toBe(true),
+    );
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    // The plaintext key is returned once, so the UI must surface it in a
+    // command the operator can run as-is.
+    const command = await screen.findByText(/spectre-agent up --host .* --authkey sk_testkey123/);
+    expect(command).toBeInTheDocument();
+  });
 
-    const calls = fetchMock.mock.calls;
+  it("surfaces machines waiting for approval", async () => {
+    const fetchMock = globalThis.fetch as unknown as Mock;
+    fetchMock.mockImplementation((url: string) => {
+      if (url === `${window.location.origin}/devices/pending`) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve([
+              { id: "p1", userCode: "WXYZ-ABCD", hostname: "build-box", createdAt: 0, expiresAt: Date.now() + 1000 },
+            ]),
+        }) as unknown as Promise<Response>;
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) }) as unknown as Promise<Response>;
+    });
 
-    const connectCalls = calls.filter(([url]) => url === `${window.location.origin}/agents/connect`);
-    expect(connectCalls.length).toBeGreaterThanOrEqual(1);
-    const connectInit = connectCalls[0]?.[1];
-    expect(connectInit.method).toBe("POST");
-    expect(connectInit.body).toBe(JSON.stringify({ address: "ws://test/ws", token: "secret" }));
-    const headers = new Headers(connectInit.headers);
-    expect(headers.get("Content-Type")).toBe("application/json");
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <App />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
 
-    const agentFetches = calls.filter(([url]) => url === `${window.location.origin}/agents`);
-    // Initial load + post-submit refresh, with React 18 potentially double-invoking effects in tests.
-    expect(agentFetches.length).toBeGreaterThanOrEqual(2);
+    expect(await screen.findByText(/1 machine waiting for approval/i)).toBeInTheDocument();
+    expect(screen.getByText(/WXYZ-ABCD/)).toBeInTheDocument();
   });
 });

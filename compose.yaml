@@ -1,27 +1,40 @@
 # Production Compose file. Uses published images from GHCR.
 # Pin versions after a release, e.g.: image: ghcr.io/sidhantpanda/spectre/server:1.0.0
+#
+# Spectre will not start without ADMIN_PASSWORD. Generate one with:
+#     export ADMIN_PASSWORD=$(openssl rand -base64 24)
+#
+# The web-ui container proxies the API on its own origin, so only one port is
+# published and the control server is reachable only from inside this network.
 services:
   server:
     image: ghcr.io/sidhantpanda/spectre/server:${SERVER_VERSION:-latest}
     container_name: spectre-server
     restart: unless-stopped
-    ports:
-      - "8080:8080"
     environment:
       - PORT=8080
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?ADMIN_PASSWORD is required. Generate one with `openssl rand -base64 24`}
       - DATA_DIR=/data
+      # The UI proxy is the only client and it sets X-Forwarded-For, so the
+      # login rate limiter can trust that header here.
+      - TRUST_PROXY=1
     volumes:
       - server_data:/data
+    expose:
+      - "8080"
 
   web-ui:
     image: ghcr.io/sidhantpanda/spectre/web-ui:${WEB_UI_VERSION:-latest}
     container_name: spectre-web-ui
     restart: unless-stopped
+    depends_on:
+      - server
     ports:
-      - "3000:80"
+      - "${WEB_UI_PORT:-3000}:80"
     environment:
-      - SPECTRE_SERVER_HOST=${SPECTRE_SERVER_HOST:-http://localhost:8080}
+      # Empty: the browser reaches the API on this same origin via the proxy.
+      - SPECTRE_SERVER_HOST=
+      - SPECTRE_SERVER_UPSTREAM=server:8080
 
 volumes:
   server_data:

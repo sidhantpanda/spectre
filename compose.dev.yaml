@@ -1,27 +1,37 @@
+# Local Compose stack built from source. `pnpm dev` is the faster inner loop;
+# use this to test the built images.
+#
+# Auth is disabled here (SPECTRE_DEV_NO_AUTH=1), which the server refuses to
+# honour when NODE_ENV=production. Never copy this file to a real deployment.
 services:
   server:
     build:
       context: .
       dockerfile: server/Dockerfile
     image: spectre-server:dev
-    ports:
-      - "8080:8080"
     environment:
       - PORT=8080
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - SPECTRE_DEV_NO_AUTH=1
       - DATA_DIR=/data
+      - TRUST_PROXY=1
     volumes:
       - server_data:/data
+    # Published so the agent can reach it directly at ws://localhost:8080.
+    ports:
+      - "8080:8080"
 
   web-ui:
     build:
       context: .
       dockerfile: web-ui/Dockerfile
     image: spectre-web-ui:dev
+    depends_on:
+      - server
     ports:
       - "3000:80"
     environment:
-      - SPECTRE_SERVER_HOST=http://localhost:8080
+      - SPECTRE_SERVER_HOST=
+      - SPECTRE_SERVER_UPSTREAM=server:8080
 
 volumes:
   server_data:

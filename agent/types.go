@@ -28,8 +28,9 @@ type NetworkInfo struct {
 
 // ControlMessage documents what the agent can receive from the control server.
 type ControlMessage struct {
-	Type      string `json:"type"`
-	Token     string `json:"token,omitempty"`
+	Type string `json:"type"`
+	// DeviceKey is set only on an "enrolled" message, when the server issues
+	// this machine its long-lived credential.
 	DeviceKey string `json:"deviceKey,omitempty"`
 	Data      string `json:"data,omitempty"`
 	// SessionID differentiates simultaneous PTY sessions.

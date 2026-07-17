@@ -1,16 +1,26 @@
 import { createServer } from "http";
-import { type AddressInfo } from "net";
 import { startStaleAgentSweep } from "./agentRegistry";
 import { createApp } from "./app";
-import { AUTH_TOKEN, DATA_DIR, PORT } from "./config";
+import { ConfigError, DATA_DIR, PORT, validateConfig } from "./config";
 import { initDeviceStore } from "./deviceStore";
 import { attachWebSockets } from "./websockets";
 
 export { createApp } from "./app";
 
 if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
+  try {
+    validateConfig();
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      // Refusing to boot is the point: a Spectre server without a password is
+      // an anonymous root shell for every enrolled machine.
+      console.error(`\nSpectre cannot start.\n\n${err.message}\n`);
+      process.exit(1);
+    }
+    throw err;
+  }
+
   initDeviceStore(DATA_DIR);
-  console.log(`Device store initialized at ${DATA_DIR}/store.json`);
 
   const app = createApp();
   const httpServer = createServer(app);
@@ -20,13 +30,8 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
 
   httpServer.listen(PORT, () => {
     console.log(`Spectre control server listening on :${PORT}`);
-    const addr = httpServer.address();
-    if (addr && typeof addr === "object") {
-      const { address, port } = addr as AddressInfo;
-      const host = address === "::" || address === "0.0.0.0" ? "localhost" : address;
-      const wsURL = `ws://${host}:${port}`;
-      console.log(`Enroll agents via the web UI or: POST /devices/enroll`);
-      console.log(`Legacy token auth still available with: ./spectre-agent --host ${wsURL} --token ${AUTH_TOKEN}`);
-    }
+    console.log(`Device store: ${DATA_DIR}/store.json`);
+    console.log(`Add a machine: create an auth key in the web UI, then run`);
+    console.log(`  spectre-agent up --host wss://<this-server> --authkey <key>`);
   });
 }

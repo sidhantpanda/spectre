@@ -1,118 +1,187 @@
 import request from "supertest";
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { createApp } from "./server";
-import { AgentRecord, ControlMessage } from "./types";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { type AgentRecord, type ControlMessage } from "./types";
 
-describe("createApp routes", () => {
-  let listAgents = vi.fn<[], AgentRecord[]>();
-  let connectToAgent = vi.fn<(address: string, token: string) => AgentRecord>();
-  let pushToAgent = vi.fn<(id: string, message: ControlMessage) => void>();
+// config.ts reads the environment when it is first imported, so every suite
+// that depends on configuration stubs the env and then imports fresh modules.
+async function loadApp(env: Record<string, string> = {}) {
+  vi.resetModules();
+  vi.unstubAllEnvs();
+  for (const [key, value] of Object.entries(env)) {
+    vi.stubEnv(key, value);
+  }
+  return import("./app");
+}
+
+const agentDeps = () => ({
+  listAgents: vi.fn<[], AgentRecord[]>(() => []),
+  pushToAgent: vi.fn<(id: string, message: ControlMessage) => void>(),
+});
+
+describe("routes", () => {
+  let deps: ReturnType<typeof agentDeps>;
 
   beforeEach(() => {
-    listAgents = vi.fn(() => []);
-    connectToAgent = vi.fn((address: string, token: string) => ({
-      id: "id-1",
-      connectionId: "conn-1",
-      address,
-      status: "connecting",
-      lastSeen: 123,
-      remoteAgentId: token,
-      direction: "outbound",
-    }));
-    pushToAgent = vi.fn();
+    deps = agentDeps();
   });
 
   it("returns known agents", async () => {
+    const { createApp } = await loadApp({ SPECTRE_DEV_NO_AUTH: "1" });
     const agents: AgentRecord[] = [
-      {
-        id: "a1",
-        connectionId: "conn-a1",
-        address: "ws://example",
-        status: "connected",
-        lastSeen: 1,
-        direction: "outbound",
-      },
+      { id: "a1", connectionId: "conn-a1", address: "1.2.3.4:5", status: "connected", lastSeen: 1 },
     ];
-    listAgents = vi.fn(() => agents);
+    deps.listAgents = vi.fn(() => agents);
 
-    const app = createApp({ listAgents, connectToAgent, pushToAgent }, "token");
-    const res = await request(app).get("/agents");
+    const res = await request(createApp(deps)).get("/agents");
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual(agents);
-    expect(listAgents).toHaveBeenCalledTimes(1);
   });
 
-  it("validates connect request body", async () => {
-    const app = createApp({ listAgents, connectToAgent, pushToAgent }, "token");
-    const res = await request(app).post("/agents/connect").send({});
+  it("validates commands and forwards them", async () => {
+    const { createApp } = await loadApp({ SPECTRE_DEV_NO_AUTH: "1" });
+    const app = createApp(deps);
 
-    expect(res.status).toBe(400);
-    expect(connectToAgent).not.toHaveBeenCalled();
+    const missing = await request(app).post("/agents/abc/command").send({});
+    expect(missing.status).toBe(400);
+    expect(deps.pushToAgent).not.toHaveBeenCalled();
+
+    const ok = await request(app).post("/agents/abc/command").send({ data: "ls" });
+    expect(ok.status).toBe(200);
+    expect(deps.pushToAgent).toHaveBeenCalledWith("abc", { type: "keystroke", data: "ls" });
   });
 
-  it("uses provided token or default", async () => {
-    const app = createApp({ listAgents, connectToAgent, pushToAgent }, "fallback");
-
-    await request(app)
-      .post("/agents/connect")
-      .send({ address: "ws://remote/ws" });
-    await request(app)
-      .post("/agents/connect")
-      .send({ address: "ws://remote/ws", token: "custom" });
-
-    expect(connectToAgent).toHaveBeenNthCalledWith(1, "ws://remote/ws", "fallback");
-    expect(connectToAgent).toHaveBeenNthCalledWith(2, "ws://remote/ws", "custom");
-  });
-
-  it("validates commands and forwards to push helper", async () => {
-    const app = createApp({ listAgents, connectToAgent, pushToAgent }, "token");
-
-    const missingRes = await request(app)
-      .post("/agents/abc/command")
-      .send({});
-    expect(missingRes.status).toBe(400);
-    expect(pushToAgent).not.toHaveBeenCalled();
-
-    const okRes = await request(app)
-      .post("/agents/abc/command")
-      .send({ data: "ls" });
-
-    expect(okRes.status).toBe(200);
-    expect(pushToAgent).toHaveBeenCalledWith("abc", { type: "keystroke", data: "ls" });
-    expect(okRes.body).toEqual({ status: "sent" });
-  });
-
-  it("refreshes docker info when requested", async () => {
+  it("refreshes agent info on request", async () => {
+    const { createApp } = await loadApp({ SPECTRE_DEV_NO_AUTH: "1" });
     const refreshDockerInfo = vi.fn();
-    const app = createApp({ listAgents, connectToAgent, pushToAgent, refreshDockerInfo }, "token");
-
-    const res = await request(app).post("/agents/refresh-docker");
-
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ status: "requested" });
-    expect(refreshDockerInfo).toHaveBeenCalledTimes(1);
-  });
-
-  it("refreshes system info when requested", async () => {
     const refreshSystemInfo = vi.fn();
-    const app = createApp({ listAgents, connectToAgent, pushToAgent, refreshSystemInfo }, "token");
+    const refreshNetworkInfo = vi.fn();
+    const app = createApp({ ...deps, refreshDockerInfo, refreshSystemInfo, refreshNetworkInfo });
 
-    const res = await request(app).post("/agents/refresh-system");
+    expect((await request(app).post("/agents/refresh-docker")).status).toBe(200);
+    expect((await request(app).post("/agents/refresh-network")).status).toBe(200);
+    expect((await request(app).post("/agents/refresh-system")).status).toBe(200);
 
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ status: "requested" });
+    expect(refreshDockerInfo).toHaveBeenCalledTimes(1);
     expect(refreshSystemInfo).toHaveBeenCalledTimes(1);
+    expect(refreshNetworkInfo).toHaveBeenCalledTimes(1);
   });
 
-  it("refreshes network info when requested", async () => {
-    const refreshNetworkInfo = vi.fn();
-    const app = createApp({ listAgents, connectToAgent, pushToAgent, refreshNetworkInfo }, "token");
+  it("no longer exposes an endpoint that dials arbitrary addresses", async () => {
+    const { createApp } = await loadApp({ SPECTRE_DEV_NO_AUTH: "1" });
+    const res = await request(createApp(deps)).post("/agents/connect").send({ address: "ws://169.254.169.254/" });
+    expect(res.status).toBe(404);
+  });
+});
 
-    const res = await request(app).post("/agents/refresh-network");
+describe("authentication", () => {
+  const password = "correct-horse-battery-staple";
+
+  it("rejects unauthenticated access to agent data", async () => {
+    const { createApp } = await loadApp({ ADMIN_PASSWORD: password });
+    const res = await request(createApp(agentDeps())).get("/agents");
+    expect(res.status).toBe(401);
+  });
+
+  it("issues a session for the right password and rejects the wrong one", async () => {
+    const { createApp } = await loadApp({ ADMIN_PASSWORD: password });
+    const app = createApp(agentDeps());
+
+    const bad = await request(app).post("/auth/login").send({ password: "nope" });
+    expect(bad.status).toBe(401);
+    expect(bad.body.token).toBeUndefined();
+
+    const good = await request(app).post("/auth/login").send({ password });
+    expect(good.status).toBe(200);
+    expect(good.body.token).toEqual(expect.any(String));
+
+    const authed = await request(app).get("/agents").set("Authorization", `Bearer ${good.body.token}`);
+    expect(authed.status).toBe(200);
+  });
+
+  it("rejects a token that is not a real session", async () => {
+    const { createApp } = await loadApp({ ADMIN_PASSWORD: password });
+    const res = await request(createApp(agentDeps())).get("/agents").set("Authorization", "Bearer made-up");
+    expect(res.status).toBe(401);
+  });
+
+  it("stops a password from being brute-forced", async () => {
+    const { createApp } = await loadApp({ ADMIN_PASSWORD: password });
+    const app = createApp(agentDeps());
+
+    let sawLockout = false;
+    for (let i = 0; i < 8; i += 1) {
+      const res = await request(app).post("/auth/login").send({ password: `guess-${i}` });
+      if (res.status === 429) sawLockout = true;
+    }
+    expect(sawLockout).toBe(true);
+
+    // The correct password is refused too while locked out; that is the point.
+    const locked = await request(app).post("/auth/login").send({ password });
+    expect(locked.status).toBe(429);
+  });
+
+  it("ends a session on logout", async () => {
+    const { createApp } = await loadApp({ ADMIN_PASSWORD: password });
+    const app = createApp(agentDeps());
+
+    const { body } = await request(app).post("/auth/login").send({ password });
+    const auth = { Authorization: `Bearer ${body.token}` };
+
+    expect((await request(app).post("/auth/logout").set(auth)).status).toBe(200);
+    expect((await request(app).get("/agents").set(auth)).status).toBe(401);
+  });
+
+  it("keeps liveness and version public", async () => {
+    const { createApp } = await loadApp({ ADMIN_PASSWORD: password });
+    const app = createApp(agentDeps());
+    expect((await request(app).get("/healthz")).status).toBe(200);
+    expect((await request(app).get("/version")).status).toBe(200);
+  });
+});
+
+describe("websocket tickets", () => {
+  const password = "correct-horse-battery-staple";
+
+  it("issues single-use tickets and refuses to reuse them", async () => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+    vi.stubEnv("ADMIN_PASSWORD", password);
+
+    const { createApp } = await import("./app");
+    const { redeemWsTicket } = await import("./auth");
+    const app = createApp(agentDeps());
+
+    const { body } = await request(app).post("/auth/login").send({ password });
+    const res = await request(app).post("/auth/ws-ticket").set("Authorization", `Bearer ${body.token}`);
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ status: "requested" });
-    expect(refreshNetworkInfo).toHaveBeenCalledTimes(1);
+    expect(redeemWsTicket(res.body.ticket)).toBe(true);
+    // A ticket that leaks into a log is worthless the moment it is used once.
+    expect(redeemWsTicket(res.body.ticket)).toBe(false);
+  });
+
+  it("requires a session to mint a ticket", async () => {
+    const { createApp } = await loadApp({ ADMIN_PASSWORD: password });
+    expect((await request(createApp(agentDeps())).post("/auth/ws-ticket")).status).toBe(401);
+  });
+});
+
+describe("CORS", () => {
+  it("never reflects an unknown origin", async () => {
+    const { createApp } = await loadApp({ SPECTRE_DEV_NO_AUTH: "1", CORS_ORIGIN: "https://spectre.example.com" });
+    const app = createApp(agentDeps());
+
+    const evil = await request(app).get("/agents").set("Origin", "https://evil.example.com");
+    expect(evil.headers["access-control-allow-origin"]).toBeUndefined();
+
+    const allowed = await request(app).get("/agents").set("Origin", "https://spectre.example.com");
+    expect(allowed.headers["access-control-allow-origin"]).toBe("https://spectre.example.com");
+  });
+
+  it("does not allow any origin by default", async () => {
+    const { createApp } = await loadApp({ SPECTRE_DEV_NO_AUTH: "1" });
+    const res = await request(createApp(agentDeps())).get("/agents").set("Origin", "https://evil.example.com");
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
   });
 });

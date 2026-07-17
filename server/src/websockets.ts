@@ -1,39 +1,23 @@
-import fs from "fs";
 import { type IncomingMessage, type Server as HttpServer } from "http";
 import WebSocket, { type RawData, WebSocketServer } from "ws";
 import { v4 as uuid } from "uuid";
-import {
-  currentAgent,
-  listAgents,
-  onAgentOutput,
-  onAgentStatusChange,
-  pushToAgent,
-  registerInboundAgent,
-} from "./agentRegistry";
-import { isAuthEnabled, validateSession, extractTokenFromUrl } from "./auth";
-import { AUTH_TOKEN } from "./config";
-import {
-  validateEnrollmentToken,
-  consumeEnrollmentToken,
-  createDevice,
-  findDeviceByKey,
-  updateDevice,
-  isInitialized as isDeviceStoreInitialized,
-} from "./deviceStore";
-import { type AgentRecord } from "./types";
-import { inboundAddress } from "./utils/net";
+import { currentAgent, listAgents, onAgentOutput, onAgentStatusChange, pushToAgent, registerInboundAgent } from "./agentRegistry";
+import { extractTicketFromUrl, isAuthEnabled, redeemWsTicket } from "./auth";
+import { findDeviceByKey, isInitialized as isDeviceStoreInitialized, redeemAuthKey, touchDevice } from "./deviceStore";
+import { type AgentRecord, type ControlMessage } from "./types";
+import { inboundAddress, safePath } from "./utils/net";
 
 const uiClients: Map<string, Map<string, WebSocket>> = new Map();
 const agentEventClients: Set<WebSocket> = new Set();
 
+// Keystrokes are small; a peer sending more than this is not a terminal user.
+const MAX_UI_MESSAGE_BYTES = 64 * 1024;
+
 function broadcastToUi(agentId: string, payload: { type: string; [key: string]: unknown }) {
   const clients = uiClients.get(agentId);
-  if (!clients || clients.size === 0) {
-    return;
-  }
+  if (!clients || clients.size === 0) return;
 
   const targetSession = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
-
   if (targetSession) {
     const exactSocket = clients.get(targetSession);
     if (exactSocket && exactSocket.readyState === WebSocket.OPEN) {
@@ -79,15 +63,14 @@ function handleUiConnection(uiWss: WebSocketServer) {
     viewers.set(viewerId, socket);
     uiClients.set(agentId, viewers);
 
-    console.log(`[ui terminal] viewer ${viewerId} connected for agent ${agentId} (viewers=${viewers.size})`);
+    console.log(`[ui terminal] viewer connected for agent ${agentId} (viewers=${viewers.size})`);
 
     socket.send(
       JSON.stringify({
         type: "status",
         status: entry.record.status,
         fingerprint: entry.record.fingerprint,
-        deviceId: entry.record.deviceId ?? entry.record.remoteAgentId,
-        remoteAgentId: entry.record.remoteAgentId,
+        deviceId: entry.record.deviceId,
         agentId: entry.record.id,
         connectionId: viewerId,
         sessionId: termSessionId,
@@ -101,8 +84,13 @@ function handleUiConnection(uiWss: WebSocketServer) {
     }
 
     socket.on("message", (data: RawData) => {
+      const raw = data.toString();
+      if (raw.length > MAX_UI_MESSAGE_BYTES) {
+        socket.close(1009, "message too large");
+        return;
+      }
       try {
-        const parsed = JSON.parse(data.toString()) as { type?: string; data?: string };
+        const parsed = JSON.parse(raw) as { type?: string; data?: string };
         if (parsed.type !== "input" || typeof parsed.data !== "string") return;
         pushToAgent(agentId, { type: "keystroke", data: parsed.data, sessionId: termSessionId });
       } catch (err) {
@@ -112,15 +100,10 @@ function handleUiConnection(uiWss: WebSocketServer) {
 
     socket.on("close", () => {
       const currentViewers = uiClients.get(agentId);
-      if (currentViewers) {
-        currentViewers.delete(viewerId);
-        if (currentViewers.size === 0) {
-          uiClients.delete(agentId);
-          console.log(`[ui terminal] viewer ${viewerId} disconnected for agent ${agentId} (viewers=0)`);
-        } else {
-          console.log(`[ui terminal] viewer ${viewerId} disconnected for agent ${agentId} (viewers=${currentViewers.size})`);
-        }
-      }
+      if (!currentViewers) return;
+      currentViewers.delete(viewerId);
+      if (currentViewers.size === 0) uiClients.delete(agentId);
+      console.log(`[ui terminal] viewer disconnected for agent ${agentId} (viewers=${currentViewers.size})`);
     });
   });
 }
@@ -129,108 +112,114 @@ function handleAgentEventStream(agentEventsWss: WebSocketServer) {
   agentEventsWss.on("connection", (socket: WebSocket) => {
     agentEventClients.add(socket);
     socket.send(JSON.stringify({ type: "agents", agents: listAgents() }));
-
-    socket.on("close", () => {
-      agentEventClients.delete(socket);
-    });
+    socket.on("close", () => agentEventClients.delete(socket));
   });
+}
+
+/**
+ * Reads the agent's credential from the Authorization header.
+ *
+ * Credentials are never accepted in the query string: URLs end up in access
+ * logs, proxy logs and Referer headers, and a device key is a permanent shell
+ * credential.
+ */
+function agentCredential(req: IncomingMessage): string | null {
+  const header = req.headers.authorization;
+  if (!header?.startsWith("Bearer ")) return null;
+  const value = header.slice(7).trim();
+  return value.length > 0 ? value : null;
+}
+
+type AgentAuth = { deviceStoreId: string; issuedDeviceKey?: string };
+
+/**
+ * Authenticates an agent from its handshake request.
+ *
+ * Runs before the WebSocket handshake is completed, so an unauthenticated peer
+ * never gets an open socket. Returns null to reject.
+ */
+function authenticateAgent(req: IncomingMessage): AgentAuth | null {
+  const address = inboundAddress(req);
+
+  if (!isDeviceStoreInitialized()) return null;
+
+  const credential = agentCredential(req);
+  if (!credential) {
+    console.log(`[agent] rejected connection from ${address}: no credential`);
+    return null;
+  }
+
+  // An auth key enrols the machine and is exchanged for a device key on the
+  // spot, so a fresh agent is connected in one round trip.
+  if (credential.startsWith("sk_")) {
+    const enrolled = redeemAuthKey(credential);
+    if (!enrolled) {
+      console.log(`[agent] rejected connection from ${address}: invalid or spent auth key`);
+      return null;
+    }
+    console.log(`[agent] enrolled new device ${enrolled.device.id} from ${address}`);
+    return { deviceStoreId: enrolled.device.id, issuedDeviceKey: enrolled.deviceKey };
+  }
+
+  const device = findDeviceByKey(credential);
+  if (!device) {
+    console.log(`[agent] rejected connection from ${address}: unknown or revoked device key`);
+    return null;
+  }
+  touchDevice(credential, { lastSeen: Date.now() });
+  console.log(`[agent] device ${device.id} connected from ${address}`);
+  return { deviceStoreId: device.id };
 }
 
 function handleInboundAgents(inboundAgentWss: WebSocketServer) {
-  inboundAgentWss.on("wsClientError", (err: Error, _socket: WebSocket, req: IncomingMessage) => {
-    console.warn(`[agent inbound] wsClientError ${req.url ?? ""}: ${err.message}`);
-    try {
-      fs.appendFileSync(
-        "/tmp/spectre-ws-errors.log",
-        `[${new Date().toISOString()}] ${req.url ?? ""} ${err.message}\n`,
-      );
-    } catch {
-      /* ignore file write errors */
+  inboundAgentWss.on("connection", (socket: WebSocket, req: IncomingMessage, auth: AgentAuth) => {
+    registerInboundAgent(socket, inboundAddress(req), auth.deviceStoreId);
+    if (auth.issuedDeviceKey) {
+      socket.send(JSON.stringify({ type: "enrolled", deviceKey: auth.issuedDeviceKey } satisfies ControlMessage));
     }
-  });
-
-  inboundAgentWss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
-    console.log(`[agent inbound] connection attempt ${req.url ?? ""} from ${inboundAddress(req)}`);
-    const { searchParams } = new URL(req.url ?? "", `http://${req.headers.host}`);
-    const address = inboundAddress(req);
-
-    const enrollParam = searchParams.get("enroll");
-    const keyParam = searchParams.get("key");
-
-    if (isDeviceStoreInitialized() && enrollParam) {
-      const tokenRecord = validateEnrollmentToken(enrollParam);
-      if (!tokenRecord) {
-        console.log(`[agent inbound] invalid or expired enrollment token from ${address}`);
-        socket.close(4401, "invalid or expired enrollment token");
-        return;
-      }
-      const device = createDevice();
-      consumeEnrollmentToken(enrollParam);
-      console.log(`[agent inbound] enrolled new device ${device.id} from ${address}`);
-      registerInboundAgent(socket, device.deviceKey, address, device.deviceKey);
-      return;
-    }
-
-    if (isDeviceStoreInitialized() && keyParam) {
-      const device = findDeviceByKey(keyParam);
-      if (!device) {
-        console.log(`[agent inbound] unknown device key from ${address}`);
-        socket.close(4401, "unknown device key");
-        return;
-      }
-      updateDevice(keyParam, { lastSeen: Date.now() });
-      console.log(`[agent inbound] authenticated device ${device.id} from ${address}`);
-      registerInboundAgent(socket, keyParam, address);
-      return;
-    }
-
-    const token = searchParams.get("token") || "";
-    if (token && token === AUTH_TOKEN) {
-      console.log(`[agent inbound] legacy token auth from ${address}`);
-      registerInboundAgent(socket, token, address);
-      return;
-    }
-
-    console.log(`[agent inbound] rejected: no valid credentials from ${address}`);
-    socket.close(4401, "authentication required");
   });
 }
 
-function checkWsAuth(req: IncomingMessage): boolean {
+function checkUiAuth(req: IncomingMessage): boolean {
   if (!isAuthEnabled()) return true;
-  const token = extractTokenFromUrl(req.url ?? "", req.headers.host ?? "localhost");
-  return token !== null && validateSession(token);
+  return redeemWsTicket(extractTicketFromUrl(req.url ?? "", req.headers.host ?? "localhost"));
 }
 
-function routeUpgrades(httpServer: HttpServer, uiWss: WebSocketServer, agentEventsWss: WebSocketServer, inboundAgentWss: WebSocketServer) {
+function routeUpgrades(
+  httpServer: HttpServer,
+  uiWss: WebSocketServer,
+  agentEventsWss: WebSocketServer,
+  inboundAgentWss: WebSocketServer,
+) {
   httpServer.on("upgrade", (req: IncomingMessage, socket, head) => {
     const { pathname } = new URL(req.url ?? "", `http://${req.headers.host}`);
-    const key = req.headers["sec-websocket-key"] ? "present" : "missing";
-    console.log(
-      `[ws upgrade] ${req.method} ${req.url} upgrade=${req.headers.upgrade} version=${req.headers["sec-websocket-version"]} key=${key}`,
-    );
-    if (pathname === "/terminal") {
-      if (!checkWsAuth(req)) {
+    // safePath, not req.url: the terminal URL carries a ticket.
+    console.log(`[ws upgrade] ${safePath(req.url)}`);
+
+    if (pathname === "/terminal" || pathname === "/agents/events") {
+      if (!checkUiAuth(req)) {
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
         socket.destroy();
         return;
       }
-      uiWss.handleUpgrade(req, socket, head, (ws) => uiWss.emit("connection", ws, req));
+      const wss = pathname === "/terminal" ? uiWss : agentEventsWss;
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
       return;
     }
-    if (pathname === "/agents/events") {
-      if (!checkWsAuth(req)) {
-        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-        socket.destroy();
-        return;
-      }
-      agentEventsWss.handleUpgrade(req, socket, head, (ws) => agentEventsWss.emit("connection", ws, req));
-      return;
-    }
+
     if (pathname === "/agents/register") {
-      inboundAgentWss.handleUpgrade(req, socket, head, (ws) => inboundAgentWss.emit("connection", ws, req));
+      const auth = authenticateAgent(req);
+      if (!auth) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      inboundAgentWss.handleUpgrade(req, socket, head, (ws) =>
+        inboundAgentWss.emit("connection", ws, req, auth),
+      );
       return;
     }
+
     socket.destroy();
   });
 }
@@ -241,21 +230,18 @@ export function attachWebSockets(httpServer: HttpServer) {
       type: "status",
       status: record.status,
       fingerprint: record.fingerprint,
-      deviceId: record.deviceId ?? record.remoteAgentId,
-      remoteAgentId: record.remoteAgentId,
+      deviceId: record.deviceId,
       agentId: record.id,
       connectionId: record.connectionId,
     });
     broadcastAgentEvent(record);
   });
 
-  onAgentOutput((agentId, payload) => {
-    broadcastToUi(agentId, payload);
-  });
+  onAgentOutput((agentId, payload) => broadcastToUi(agentId, payload));
 
-  const uiWss = new WebSocketServer({ noServer: true });
-  const agentEventsWss = new WebSocketServer({ noServer: true });
-  const inboundAgentWss = new WebSocketServer({ noServer: true });
+  const uiWss = new WebSocketServer({ noServer: true, maxPayload: MAX_UI_MESSAGE_BYTES });
+  const agentEventsWss = new WebSocketServer({ noServer: true, maxPayload: MAX_UI_MESSAGE_BYTES });
+  const inboundAgentWss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024 });
 
   handleUiConnection(uiWss);
   handleAgentEventStream(agentEventsWss);

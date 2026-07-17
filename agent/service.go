@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,8 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
-	"time"
 )
 
 const (
@@ -20,27 +17,21 @@ const (
 	launchdLabel     = "com.spectre.agent"
 )
 
-func serviceUp(listen, token, host, enroll string) error {
+func serviceUp(host, authKey string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
 
-	// Don't bake --enroll into the service file. Enrollment is a one-time
-	// operation: the agent stores the device key on first connect and uses
-	// it for all subsequent reconnections. If --enroll is provided, we run
-	// a one-shot enrollment first, then install the service without it.
-	if enroll != "" && host != "" {
-		fmt.Println("Enrolling with control server...")
-		enrollArgs := buildExecArgs(listen, token, host, enroll)
-		if err := runOneShot(exe, enrollArgs); err != nil {
-			return fmt.Errorf("enrollment failed: %w", err)
-		}
-		fmt.Println("Enrollment successful, device key stored.")
+	// Enrollment happens once, here, before the service is installed. The
+	// device key is written to the device info file, so the auth key never
+	// needs to appear in the unit file or in `ps` output.
+	if err := enrollForService(host, authKey); err != nil {
+		return err
 	}
 
-	serviceArgs := buildExecArgs(listen, token, host, "")
+	serviceArgs := buildExecArgs(host)
 
 	var installErr error
 	switch runtime.GOOS {
@@ -116,48 +107,43 @@ func purgeDataDirs() {
 	}
 }
 
-// runOneShot starts the agent briefly to complete enrollment, then stops it.
-func runOneShot(exe string, args []string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, exe, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Start(); err != nil {
-		return err
+// enrollForService makes sure this machine holds a device key before the
+// service is installed, so the service itself starts with no secret on its
+// command line. An already-enrolled machine is left alone.
+func enrollForService(host, authKey string) error {
+	info, err := ensureDeviceInfo()
+	if err != nil {
+		return fmt.Errorf("read device info: %w", err)
+	}
+	if info.DeviceKey != "" {
+		fmt.Println("This machine is already enrolled.")
+		return nil
 	}
 
-	// Wait for enrollment to complete (device key to appear in device-info.json)
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			_ = cmd.Process.Kill()
-			return fmt.Errorf("timed out waiting for enrollment")
-		case <-ticker.C:
-			info, err := ensureDeviceInfo()
-			if err == nil && info.DeviceKey != "" {
-				_ = cmd.Process.Signal(syscall.SIGTERM)
-				_ = cmd.Wait()
-				return nil
-			}
+	if authKey != "" {
+		fmt.Println("Enrolling with control server...")
+		key, err := enrollWithAuthKey(host, authKey, info.DeviceID)
+		if err != nil {
+			return fmt.Errorf("enrollment failed: %w", err)
 		}
+		info.DeviceKey = key
+	} else {
+		key, err := enrollInteractively(host, info.DeviceID)
+		if err != nil {
+			return err
+		}
+		info.DeviceKey = key
 	}
+
+	if err := saveDeviceInfo(info); err != nil {
+		return fmt.Errorf("store device key: %w", err)
+	}
+	fmt.Println("Enrolled. Device key stored.")
+	return nil
 }
 
-func buildExecArgs(listen, token, host, enroll string) []string {
-	args := []string{fmt.Sprintf("--listen=%s", listen), fmt.Sprintf("--token=%s", token)}
-	if host != "" {
-		args = append(args, fmt.Sprintf("--host=%s", host))
-	}
-	if enroll != "" {
-		args = append(args, fmt.Sprintf("--enroll=%s", enroll))
-	}
-	return args
+func buildExecArgs(host string) []string {
+	return []string{"run", fmt.Sprintf("--host=%s", host)}
 }
 
 func installSystemdService(exe string, args []string) error {
