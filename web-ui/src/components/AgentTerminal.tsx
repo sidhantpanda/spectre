@@ -234,7 +234,7 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
       </div>
       <div
         ref={containerRef}
-        className="h-64 w-full overflow-hidden rounded-md border bg-black/80"
+        className="h-[70vh] min-h-[24rem] w-full overflow-hidden rounded-md border bg-black/80"
         data-testid={`terminal-${agentId}`}
       />
     </div>

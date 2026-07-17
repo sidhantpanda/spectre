@@ -140,6 +140,20 @@ func (s *ptySession) close() {
 	killTmuxSession(s.sessionID)
 }
 
+// finish is called when the shell exits on its own (for example, the user
+// pressed Ctrl+D). It marks the session inactive so keystrokes are ignored and
+// a later reset starts a fresh shell, without closing the stop channel — reset
+// closes it, and closing it twice would panic.
+func (s *ptySession) finish() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ptm != nil {
+		_ = s.ptm.Close()
+		s.ptm = nil
+	}
+	killTmuxSession(s.sessionID)
+}
+
 func (m *ptyManager) activeSessions() []*ptySession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -259,11 +273,22 @@ func readFromPTY(conn *safeConn, session *ptySession, errCh chan<- error) {
 		if err != nil {
 			select {
 			case <-session.stopChan():
+				// The session was deliberately replaced (reset) or torn down.
 				return
 			default:
-				errCh <- err
-				return
 			}
+			// The shell exited on its own — most often the user pressed Ctrl+D.
+			// End only this terminal session; the control connection must stay
+			// up so the agent remains reachable and a fresh shell can start on
+			// the next reset. Pushing this onto errCh would drop the whole
+			// connection and make the agent appear to disconnect.
+			session.finish()
+			_ = conn.writeJSON(AgentMessage{
+				Type:      "output",
+				Data:      "\r\n\x1b[90m[session ended — reload to start a new shell]\x1b[0m\r\n",
+				SessionID: session.sessionID,
+			})
+			return
 		}
 	}
 }
