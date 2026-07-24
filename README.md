@@ -133,6 +133,55 @@ To run an agent against your dev server:
 pnpm dev:agent   # mints an auth key, enrolls, and hot-reloads on changes
 ```
 
+### Build an agent for another machine
+
+`pnpm dev:agent` only runs an agent on *this* machine. To get one onto a Pi or a server, cross-compile a binary and copy it across. The agent is a single static binary (`CGO_ENABLED=0`) with no runtime dependencies, so it runs on old distros without glibc trouble.
+
+Build both common Linux architectures in one go — the binaries land in `agent/`:
+
+```bash
+cd agent
+for arch in amd64 arm64; do
+  CGO_ENABLED=0 GOOS=linux GOARCH=$arch \
+    go build -ldflags "-X main.agentVersion=$(git describe --tags --always)" \
+    -o "spectre-agent-linux-$arch" .
+done
+```
+
+That gives you `agent/spectre-agent-linux-amd64` and `agent/spectre-agent-linux-arm64`. For a single target, run one of them directly:
+
+```bash
+cd agent
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o spectre-agent-linux-arm64 .
+```
+
+Run `uname -sm` on the target to see which one it needs:
+
+| `uname -sm` | Build with | Typical machine |
+|---|---|---|
+| `Linux x86_64` | `GOOS=linux GOARCH=amd64` | Servers, NUCs, most VPS |
+| `Linux aarch64` | `GOOS=linux GOARCH=arm64` | Raspberry Pi 4/5 on a 64-bit OS |
+| `Linux armv6l` / `armv7l` | `GOOS=linux GOARCH=arm GOARM=6` | Pi Zero, 32-bit Pi OS |
+| `Darwin arm64` | `GOOS=darwin GOARCH=arm64` | Apple Silicon Mac |
+| `Darwin x86_64` | `GOOS=darwin GOARCH=amd64` | Intel Mac |
+
+Copy it over and install it. `scp` can't write to `/usr/local/bin` directly, so land it somewhere writable first:
+
+```bash
+scp agent/spectre-agent-linux-arm64 myhost:/tmp/spectre-agent
+ssh myhost 'sudo install -m 755 /tmp/spectre-agent /usr/local/bin/spectre-agent && rm /tmp/spectre-agent'
+```
+
+Then enroll it against your dev server. **Use your dev machine's LAN IP, not `localhost`** — on the target, `localhost` is the target:
+
+```bash
+ssh -t myhost 'sudo spectre-agent up --host ws://192.0.2.10:8080'
+```
+
+Two things worth knowing: install **tmux** on the target if you want sessions to survive disconnects and agent restarts, and the `-ldflags` above is optional — without it the agent reports its version as `dev-<timestamp>`.
+
+To remove a hand-installed agent later, `sudo spectre-agent down --purge` on the target, then delete `/usr/local/bin/spectre-agent`.
+
 ```bash
 pnpm test        # test every package
 pnpm build       # build every package

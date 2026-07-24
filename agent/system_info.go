@@ -38,13 +38,6 @@ func detectOSVersion() (string, string) {
 		name := strings.TrimSpace(runSimpleCommand("sw_vers", "-productName"))
 		version := strings.TrimSpace(runSimpleCommand("sw_vers", "-productVersion"))
 		return defaultString(name, "macOS"), version
-	case "windows":
-		out := runSimpleCommand("wmic", "os", "get", "Caption", "/value")
-		parts := strings.Split(strings.TrimSpace(out), "=")
-		if len(parts) == 2 {
-			return parts[1], ""
-		}
-		return "Windows", ""
 	default:
 		return runtime.GOOS, ""
 	}
@@ -63,12 +56,6 @@ func detectCPUName() string {
 	case "darwin":
 		if out := runSimpleCommand("sysctl", "-n", "machdep.cpu.brand_string"); out != "" {
 			return out
-		}
-	case "windows":
-		out := runSimpleCommand("wmic", "cpu", "get", "Name", "/value")
-		parts := strings.Split(strings.TrimSpace(out), "=")
-		if len(parts) == 2 {
-			return strings.TrimSpace(parts[1])
 		}
 	}
 	return ""
@@ -91,14 +78,6 @@ func detectMemoryBytes() uint64 {
 		if out := runSimpleCommand("sysctl", "-n", "hw.memsize"); out != "" {
 			if bytes, err := strconv.ParseUint(strings.TrimSpace(out), 10, 64); err == nil {
 				return bytes
-			}
-		}
-	case "windows":
-		out := runSimpleCommand("wmic", "OS", "get", "TotalVisibleMemorySize", "/value")
-		parts := strings.Split(strings.TrimSpace(out), "=")
-		if len(parts) == 2 {
-			if kb, err := strconv.ParseUint(strings.TrimSpace(parts[1]), 10, 64); err == nil {
-				return kb * 1024
 			}
 		}
 	}
@@ -139,13 +118,4 @@ func defaultString(value, fallback string) string {
 		return fallback
 	}
 	return value
-}
-
-func parseUint(val string) uint64 {
-	val = strings.TrimSpace(val)
-	num, err := strconv.ParseUint(val, 10, 64)
-	if err != nil {
-		return 0
-	}
-	return num
 }

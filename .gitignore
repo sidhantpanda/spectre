@@ -4,6 +4,7 @@ server/dist
 server/data
 data/
 agent/spectre-agent
+agent/spectre-agent-*
 agent/bin
 agent/.gocache
 .DS_Store

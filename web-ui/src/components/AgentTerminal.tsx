@@ -92,7 +92,19 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true, 
         // ignore transient sizing errors
       }
     };
+
+    // Fitting only resizes the canvas in the browser. The remote PTY has to be
+    // told separately, or the shell keeps wrapping lines and drawing
+    // full-screen programs for its original geometry.
+    const resizeHandler = term.onResize(({ cols, rows }) => {
+      send({ type: "resize", cols, rows });
+    });
+
     safeFit();
+    // onResize only fires when the fitted size differs from xterm's default, so
+    // send the current geometry unconditionally — the session may have been
+    // left at a different size by a previous viewer.
+    send({ type: "resize", cols: term.cols, rows: term.rows });
 
     for (const chunk of pendingOutput.current) term.write(chunk);
     pendingOutput.current = [];
@@ -108,9 +120,17 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true, 
       send({ type: "input", data });
     });
 
+    // A ResizeObserver catches everything a window listener misses: the sidebar
+    // opening, the notice banner appearing, a phone rotating, the container's
+    // own vh-based height changing.
+    const observer = new ResizeObserver(() => safeFit());
+    observer.observe(termNode);
     window.addEventListener("resize", safeFit);
+
     return () => {
+      observer.disconnect();
       window.removeEventListener("resize", safeFit);
+      resizeHandler.dispose();
       dataHandler.dispose();
       fitRef.current?.dispose();
       fitRef.current = null;
@@ -172,8 +192,15 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true, 
         setStatus("connected");
         setNotice(null);
         // Re-attach after a dropped link so the session survives the round trip.
+        // The terminal already exists here, so its geometry rides along and the
+        // re-opened PTY starts at the right size.
         if (activeSessionRef.current) {
-          send({ type: "attach", sessionId: activeSessionRef.current });
+          const term = termRef.current;
+          send({
+            type: "attach",
+            sessionId: activeSessionRef.current,
+            ...(term ? { cols: term.cols, rows: term.rows } : {}),
+          });
         }
       };
 

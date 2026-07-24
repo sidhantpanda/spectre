@@ -1,5 +1,3 @@
-//go:build !windows
-
 package main
 
 import (
@@ -84,14 +82,26 @@ func captureTmuxPane(name string) string {
 	return strings.Join(lines, "\r\n") + "\r\n"
 }
 
-func startShell(sessionID string) *os.File {
-	if isTmuxAvailable() && sessionID != "" {
-		return startTmuxShell(sessionID)
+// setPtySize pushes a new window size onto the PTY master, which makes the
+// kernel deliver SIGWINCH to the foreground process group. For a tmux client
+// this also resizes the session's windows to match.
+func setPtySize(ptm *os.File, cols, rows uint16) {
+	if ptm == nil || cols == 0 || rows == 0 {
+		return
 	}
-	return startRawShell()
+	if err := pty.Setsize(ptm, &pty.Winsize{Cols: cols, Rows: rows}); err != nil {
+		log.Printf("[pty] resize to %dx%d failed: %v", cols, rows, err)
+	}
 }
 
-func startTmuxShell(sessionID string) *os.File {
+func startShell(sessionID string, cols, rows uint16) *os.File {
+	if isTmuxAvailable() && sessionID != "" {
+		return startTmuxShell(sessionID, cols, rows)
+	}
+	return startRawShell(cols, rows)
+}
+
+func startTmuxShell(sessionID string, cols, rows uint16) *os.File {
 	safeName := sanitizeTmuxName(sessionID)
 
 	var cmd *exec.Cmd
@@ -116,15 +126,30 @@ func startTmuxShell(sessionID string) *os.File {
 		cmd.Dir = homeDir
 	}
 
-	ptm, err := pty.Start(cmd)
+	// Opening the PTY at the browser's size means tmux lays the session out
+	// correctly from the first frame, instead of drawing at a default geometry
+	// and reflowing once the first resize arrives.
+	ptm, err := pty.StartWithAttrs(cmd, winsize(cols, rows), cmd.SysProcAttr)
 	if err != nil {
 		log.Printf("[tmux] failed to start tmux session: %v, falling back to raw shell", err)
-		return startRawShell()
+		return startRawShell(cols, rows)
 	}
 	return ptm
 }
 
-func startRawShell() *os.File {
+// winsize builds a Winsize, substituting a conventional 80x24 when the caller
+// has no size yet, so a PTY is never opened at 0x0.
+func winsize(cols, rows uint16) *pty.Winsize {
+	if cols == 0 {
+		cols = defaultCols
+	}
+	if rows == 0 {
+		rows = defaultRows
+	}
+	return &pty.Winsize{Cols: cols, Rows: rows}
+}
+
+func startRawShell(cols, rows uint16) *os.File {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/bash"
@@ -142,7 +167,7 @@ func startRawShell() *os.File {
 		cmd.Dir = homeDir
 	}
 
-	ptm, err := pty.Start(cmd)
+	ptm, err := pty.StartWithAttrs(cmd, winsize(cols, rows), cmd.SysProcAttr)
 	if err != nil {
 		log.Fatalf("failed to start shell: %v", err)
 	}

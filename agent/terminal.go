@@ -93,11 +93,22 @@ func (c *safeConn) close() error {
 	return c.conn.Close()
 }
 
+// Conventional terminal size, used until the browser reports its own.
+const (
+	defaultCols uint16 = 80
+	defaultRows uint16 = 24
+)
+
 type ptySession struct {
 	mu        sync.RWMutex
 	ptm       *os.File
 	stop      chan struct{}
 	sessionID string
+	// cols and rows track the viewer's geometry. They are remembered on the
+	// session so a reconnect re-opens the PTY at the right size rather than
+	// dropping back to the default until the next resize arrives.
+	cols uint16
+	rows uint16
 }
 
 func newPtySession(sessionID string) *ptySession {
@@ -105,7 +116,22 @@ func newPtySession(sessionID string) *ptySession {
 		ptm:       nil,
 		stop:      make(chan struct{}),
 		sessionID: sessionID,
+		cols:      defaultCols,
+		rows:      defaultRows,
 	}
+}
+
+// resize records a new geometry and applies it to the live PTY, if there is one.
+func (s *ptySession) resize(cols, rows uint16) {
+	if cols == 0 || rows == 0 {
+		return
+	}
+	s.mu.Lock()
+	s.cols, s.rows = cols, rows
+	ptm := s.ptm
+	s.mu.Unlock()
+
+	setPtySize(ptm, cols, rows)
 }
 
 func (s *ptySession) current() *os.File {
@@ -127,7 +153,7 @@ func (s *ptySession) reset() *os.File {
 	oldStop := s.stop
 	old := s.ptm
 	s.stop = make(chan struct{})
-	s.ptm = startShell(s.sessionID)
+	s.ptm = startShell(s.sessionID, s.cols, s.rows)
 	s.mu.Unlock()
 
 	close(oldStop)
@@ -152,7 +178,10 @@ func (m *ptyManager) get(sessionID string) *ptySession {
 	return m.sessions[sessionID]
 }
 
-func (m *ptyManager) reset(sessionID string) (*ptySession, bool) {
+// reset returns the session for sessionID, starting a shell if it has none.
+// cols and rows are the requesting viewer's geometry; they are applied before
+// the shell starts so it is never laid out at the wrong size.
+func (m *ptyManager) reset(sessionID string, cols, rows uint16) (*ptySession, bool) {
 	m.mu.Lock()
 	session, ok := m.sessions[sessionID]
 	if !ok {
@@ -161,6 +190,10 @@ func (m *ptyManager) reset(sessionID string) (*ptySession, bool) {
 	}
 	alreadyRunning := ok && session.current() != nil
 	m.mu.Unlock()
+
+	// Applies to the live PTY when one exists, and is remembered for the shell
+	// started just below when one does not.
+	session.resize(cols, rows)
 
 	if alreadyRunning {
 		return session, false
@@ -322,7 +355,7 @@ func readFromControl(conn *safeConn, sessions *ptyManager, errCh chan<- error, r
 			if sessionID == "" {
 				sessionID = newSessionID()
 			}
-			session, created := sessions.reset(sessionID)
+			session, created := sessions.reset(sessionID, msg.Cols, msg.Rows)
 			if created {
 				restartPTY(session)
 			}
@@ -355,12 +388,22 @@ func readFromControl(conn *safeConn, sessions *ptyManager, errCh chan<- error, r
 			}
 		// "reset" is what pre-multi-session servers send; it means the same
 		// thing as attachSession, so both are handled here.
+		case "resize":
+			if sessionID == "" {
+				continue
+			}
+			session := sessions.get(sessionID)
+			if session == nil {
+				log.Printf("ignoring resize for unknown session %s", sessionID)
+				continue
+			}
+			session.resize(msg.Cols, msg.Rows)
 		case "attachSession", "reset":
 			if sessionID == "" {
 				log.Printf("ignoring attach with no session id")
 				continue
 			}
-			session, created := sessions.reset(sessionID)
+			session, created := sessions.reset(sessionID, msg.Cols, msg.Rows)
 			if created {
 				restartPTY(session)
 			} else {

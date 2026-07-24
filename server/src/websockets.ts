@@ -121,13 +121,23 @@ function handleUiConnection(uiWss: WebSocketServer) {
         return;
       }
 
-      let parsed: { type?: string; data?: string; sessionId?: string };
+      let parsed: { type?: string; data?: string; sessionId?: string; cols?: number; rows?: number };
       try {
         parsed = JSON.parse(raw) as typeof parsed;
       } catch (err) {
         send({ type: "error", message: (err as Error).message });
         return;
       }
+
+      // Geometry is only ever forwarded when it is a sane pair of positive
+      // integers, so a bad client cannot push the remote PTY to 0 or absurd
+      // sizes.
+      const geometry = () => {
+        const { cols, rows } = parsed;
+        if (!Number.isInteger(cols) || !Number.isInteger(rows)) return undefined;
+        if (cols! < 1 || rows! < 1 || cols! > 1000 || rows! > 1000) return undefined;
+        return { cols: cols!, rows: rows! };
+      };
 
       switch (parsed.type) {
         case "input": {
@@ -145,7 +155,7 @@ function handleUiConnection(uiWss: WebSocketServer) {
         case "create": {
           const sessionId = `spectre-${uuid()}`;
           viewer.sessionId = sessionId;
-          if (toAgent({ type: "createSession", sessionId })) {
+          if (toAgent({ type: "createSession", sessionId, ...geometry() })) {
             send({ type: "attached", sessionId });
           }
           return;
@@ -153,9 +163,15 @@ function handleUiConnection(uiWss: WebSocketServer) {
         case "attach": {
           if (typeof parsed.sessionId !== "string" || !parsed.sessionId) return;
           viewer.sessionId = parsed.sessionId;
-          if (toAgent({ type: "attachSession", sessionId: parsed.sessionId })) {
+          if (toAgent({ type: "attachSession", sessionId: parsed.sessionId, ...geometry() })) {
             send({ type: "attached", sessionId: parsed.sessionId });
           }
+          return;
+        }
+        case "resize": {
+          const size = geometry();
+          if (!size || !viewer.sessionId) return;
+          toAgent({ type: "resize", sessionId: viewer.sessionId, ...size });
           return;
         }
         case "kill": {

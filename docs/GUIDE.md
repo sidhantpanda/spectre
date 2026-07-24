@@ -141,7 +141,6 @@ ssh <user>@<remote> 'uname -sm'
 | `Linux armv7l` / `armv6l` | `linux` | `arm` | Raspberry Pi (32-bit), older SBCs |
 | `Darwin arm64` | `darwin` | `arm64` | Apple Silicon Mac |
 | `Darwin x86_64` | `darwin` | `amd64` | Intel Mac |
-| *(Windows)* | `windows` | `amd64` | Windows (build with `-o spectre-agent.exe`) |
 
 **2. Build for that target.** From `agent/`:
 

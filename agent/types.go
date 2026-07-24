@@ -54,6 +54,11 @@ type ControlMessage struct {
 	Data      string `json:"data,omitempty"`
 	// SessionID differentiates simultaneous PTY sessions.
 	SessionID string `json:"sessionId,omitempty"`
+	// Cols and Rows carry the browser terminal's geometry. Without them the PTY
+	// keeps whatever size it was opened at, so full-screen programs and line
+	// wrapping are laid out for a window the user is not looking at.
+	Cols uint16 `json:"cols,omitempty"`
+	Rows uint16 `json:"rows,omitempty"`
 }
 
 // AgentMessage documents what the agent sends to the control server.

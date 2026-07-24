@@ -91,9 +91,15 @@ export type ControlMessage =
   /** Asks the agent to enumerate every tmux session on its host. */
   | { type: "listSessions" }
   /** Opens a new session; the server mints the `spectre-<uuid>` name. */
-  | { type: "createSession"; sessionId: string }
+  | { type: "createSession"; sessionId: string; cols?: number; rows?: number }
   /** Attaches to an existing session, creating it if it has since vanished. */
-  | { type: "attachSession"; sessionId: string }
+  | { type: "attachSession"; sessionId: string; cols?: number; rows?: number }
+  /**
+   * Reports the viewer's terminal geometry so the remote PTY matches it.
+   * Without this the shell keeps its opening size and wraps text for a window
+   * nobody is looking at.
+   */
+  | { type: "resize"; sessionId: string; cols: number; rows: number }
   /** Tears a session down for good (tmux kill-session). */
   | { type: "killSession"; sessionId: string }
   /** Legacy alias for attachSession, still understood by older agents. */
