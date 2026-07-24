@@ -230,6 +230,8 @@ Or, to remove just the service and its data (leaving the binary):
 sudo spectre-agent down --purge
 ```
 
+`down` leaves the binary in place. Delete it when you're done: `sudo rm /usr/local/bin/spectre-agent`.
+
 Revoking the machine in the web UI is what actually cuts off access — uninstalling only stops the agent from reconnecting.
 
 ### Persistent sessions via tmux

@@ -71,6 +71,28 @@ sudo spectre-agent up --host wss://spectre.example.com --authkey sk_...
 
 Either way the machine enrolls, stores a device key, installs itself as a service, and reconnects on boot. Click it in the UI to open a terminal.
 
+### 3. Remove a machine
+
+To uninstall the agent, run this on the machine itself:
+
+```bash
+sudo spectre-agent down
+```
+
+This stops and removes the service but keeps the stored device key, so running `spectre-agent up` again re-enrolls without another approval. To also delete the device key and enrollment state, add `--purge`:
+
+```bash
+sudo spectre-agent down --purge
+```
+
+Neither removes the binary itself. Delete it when you're done:
+
+```bash
+sudo rm /usr/local/bin/spectre-agent
+```
+
+Removing the agent doesn't delete the device from the control server. Use **Remove** on the (now disconnected) device in the web UI to drop it from the list.
+
 ---
 
 ## Security model
