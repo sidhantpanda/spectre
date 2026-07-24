@@ -18,6 +18,10 @@ func killTmuxSession(_ string) {}
 
 func captureTmuxPane(_ string) string { return "" }
 
+// listTmuxSessions has nothing to discover on Windows: without tmux, sessions
+// only exist in this process's memory and are reported from there instead.
+func listTmuxSessions() []SessionInfo { return nil }
+
 func startShell(_ string) *os.File {
 	shell := os.Getenv("COMSPEC")
 	if shell == "" {

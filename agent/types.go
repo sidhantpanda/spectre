@@ -26,6 +26,25 @@ type NetworkInfo struct {
 	IPv6 []string `json:"ipv6"`
 }
 
+// SessionInfo describes one terminal session as the agent sees it.
+//
+// ID is the tmux session name, which is also what the control protocol uses to
+// address the session. Sessions the agent created are named "spectre-<uuid>";
+// sessions the user started themselves (over SSH, say) keep their own names and
+// are reported with Managed false.
+type SessionInfo struct {
+	ID string `json:"id"`
+	// CreatedAt is a Unix timestamp from tmux, absent for raw shells.
+	CreatedAt int64 `json:"createdAt,omitempty"`
+	// Attached reports whether any tmux client is currently viewing it.
+	Attached bool `json:"attached"`
+	Windows  int  `json:"windows,omitempty"`
+	// Managed marks sessions Spectre created, as opposed to pre-existing ones.
+	Managed bool `json:"managed"`
+	// Live marks sessions this agent process currently holds a PTY for.
+	Live bool `json:"live"`
+}
+
 // ControlMessage documents what the agent can receive from the control server.
 type ControlMessage struct {
 	Type string `json:"type"`
@@ -48,5 +67,9 @@ type AgentMessage struct {
 	Containers   []DockerContainer `json:"containers,omitempty"`
 	SystemInfo   *SystemInfo       `json:"systemInfo,omitempty"`
 	NetworkInfo  *NetworkInfo      `json:"networkInfo,omitempty"`
-	Error        string            `json:"error,omitempty"`
+	Sessions     []SessionInfo     `json:"sessions,omitempty"`
+	// TmuxAvailable tells the UI whether sessions can outlive a disconnect on
+	// this host. Sent alongside a session list.
+	TmuxAvailable bool   `json:"tmuxAvailable,omitempty"`
+	Error         string `json:"error,omitempty"`
 }

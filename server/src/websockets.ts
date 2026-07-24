@@ -7,29 +7,50 @@ import { findDeviceByKey, isInitialized as isDeviceStoreInitialized, redeemAuthK
 import { type AgentRecord, type ControlMessage } from "./types";
 import { inboundAddress, safePath } from "./utils/net";
 
-const uiClients: Map<string, Map<string, WebSocket>> = new Map();
+/**
+ * A connected browser tab, and the session it is currently attached to.
+ *
+ * `sessionId` is null while the tab is sitting on the session picker, and is
+ * bound the moment it attaches to or creates one.
+ */
+type Viewer = { socket: WebSocket; sessionId: string | null };
+
+const uiClients: Map<string, Map<string, Viewer>> = new Map();
 const agentEventClients: Set<WebSocket> = new Set();
 
 // Keystrokes are small; a peer sending more than this is not a terminal user.
 const MAX_UI_MESSAGE_BYTES = 64 * 1024;
+
+/**
+ * Payloads that belong to one session and must not leak into another tab.
+ *
+ * Everything else (status, session lists) is agent-wide and goes to every
+ * viewer of that agent.
+ */
+const SESSION_SCOPED = new Set(["output", "sessionExited"]);
 
 function broadcastToUi(agentId: string, payload: { type: string; [key: string]: unknown }) {
   const clients = uiClients.get(agentId);
   if (!clients || clients.size === 0) return;
 
   const targetSession = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
-  if (targetSession) {
-    const exactSocket = clients.get(targetSession);
-    if (exactSocket && exactSocket.readyState === WebSocket.OPEN) {
-      exactSocket.send(JSON.stringify(payload));
-      return;
+  const raw = JSON.stringify(payload);
+
+  // Terminal output is addressed by session, and viewers are keyed by viewer
+  // id, so this has to match on the viewer's bound session rather than looking
+  // the id up as a key. Getting this wrong sends one session's output to every
+  // tab watching the agent — which, with a single hardcoded session, used to
+  // look harmless.
+  if (targetSession && SESSION_SCOPED.has(payload.type)) {
+    for (const viewer of clients.values()) {
+      if (viewer.sessionId !== targetSession) continue;
+      if (viewer.socket.readyState === WebSocket.OPEN) viewer.socket.send(raw);
     }
+    return;
   }
 
-  for (const socket of clients.values()) {
-    if (socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(payload));
-    }
+  for (const viewer of clients.values()) {
+    if (viewer.socket.readyState === WebSocket.OPEN) viewer.socket.send(raw);
   }
 }
 
@@ -57,31 +78,41 @@ function handleUiConnection(uiWss: WebSocketServer) {
     }
 
     const viewerId = uuid();
-    const termSessionId = "spectre";
+    const viewer: Viewer = { socket, sessionId: null };
 
-    const viewers = uiClients.get(agentId) ?? new Map<string, WebSocket>();
-    viewers.set(viewerId, socket);
+    const viewers = uiClients.get(agentId) ?? new Map<string, Viewer>();
+    viewers.set(viewerId, viewer);
     uiClients.set(agentId, viewers);
 
     console.log(`[ui terminal] viewer connected for agent ${agentId} (viewers=${viewers.size})`);
 
-    socket.send(
-      JSON.stringify({
-        type: "status",
-        status: entry.record.status,
-        fingerprint: entry.record.fingerprint,
-        deviceId: entry.record.deviceId,
-        agentId: entry.record.id,
-        connectionId: viewerId,
-        sessionId: termSessionId,
-      }),
-    );
+    const send = (payload: Record<string, unknown>) => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload));
+    };
 
-    try {
-      pushToAgent(agentId, { type: "reset", sessionId: termSessionId });
-    } catch (err) {
-      socket.send(JSON.stringify({ type: "error", message: (err as Error).message }));
-    }
+    const toAgent = (message: ControlMessage) => {
+      try {
+        pushToAgent(agentId, message);
+        return true;
+      } catch (err) {
+        send({ type: "error", message: (err as Error).message });
+        return false;
+      }
+    };
+
+    send({
+      type: "status",
+      status: entry.record.status,
+      fingerprint: entry.record.fingerprint,
+      deviceId: entry.record.deviceId,
+      agentId: entry.record.id,
+      connectionId: viewerId,
+    });
+
+    // No session is opened on connect. The tab lands on the picker and the user
+    // chooses, so merely opening a terminal page no longer spawns a shell on
+    // the host.
+    toAgent({ type: "listSessions" });
 
     socket.on("message", (data: RawData) => {
       const raw = data.toString();
@@ -89,15 +120,62 @@ function handleUiConnection(uiWss: WebSocketServer) {
         socket.close(1009, "message too large");
         return;
       }
+
+      let parsed: { type?: string; data?: string; sessionId?: string };
       try {
-        const parsed = JSON.parse(raw) as { type?: string; data?: string };
-        if (parsed.type !== "input" || typeof parsed.data !== "string") return;
-        pushToAgent(agentId, { type: "keystroke", data: parsed.data, sessionId: termSessionId });
+        parsed = JSON.parse(raw) as typeof parsed;
       } catch (err) {
-        socket.send(JSON.stringify({ type: "error", message: (err as Error).message }));
+        send({ type: "error", message: (err as Error).message });
+        return;
+      }
+
+      switch (parsed.type) {
+        case "input": {
+          if (typeof parsed.data !== "string") return;
+          // Keystrokes before a session is chosen have nowhere to go; dropping
+          // them stops a stray keypress from being written into whichever
+          // session happened to be first.
+          if (!viewer.sessionId) return;
+          toAgent({ type: "keystroke", data: parsed.data, sessionId: viewer.sessionId });
+          return;
+        }
+        case "listSessions":
+          toAgent({ type: "listSessions" });
+          return;
+        case "create": {
+          const sessionId = `spectre-${uuid()}`;
+          viewer.sessionId = sessionId;
+          if (toAgent({ type: "createSession", sessionId })) {
+            send({ type: "attached", sessionId });
+          }
+          return;
+        }
+        case "attach": {
+          if (typeof parsed.sessionId !== "string" || !parsed.sessionId) return;
+          viewer.sessionId = parsed.sessionId;
+          if (toAgent({ type: "attachSession", sessionId: parsed.sessionId })) {
+            send({ type: "attached", sessionId: parsed.sessionId });
+          }
+          return;
+        }
+        case "kill": {
+          if (typeof parsed.sessionId !== "string" || !parsed.sessionId) return;
+          if (viewer.sessionId === parsed.sessionId) viewer.sessionId = null;
+          toAgent({ type: "killSession", sessionId: parsed.sessionId });
+          return;
+        }
+        // Leaving a session running: unbind this tab without touching the
+        // session, so it stays attachable later.
+        case "detach":
+          viewer.sessionId = null;
+          toAgent({ type: "listSessions" });
+          return;
       }
     });
 
+    // Closing the tab leaves the session running on the host; that is the whole
+    // point of tmux-backed sessions, and it is what makes "go back without
+    // killing it" work.
     socket.on("close", () => {
       const currentViewers = uiClients.get(agentId);
       if (!currentViewers) return;

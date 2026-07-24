@@ -163,6 +163,15 @@ export function registerInboundAgent(socket: WebSocket, address: string, deviceS
       case "heartbeat":
         markDeviceSeen(deviceStoreId);
         return;
+      // Session lifecycle is relayed straight through to the UI; the server
+      // keeps no session state of its own, because tmux on the agent's host is
+      // the only thing that actually knows which sessions exist.
+      case "sessions":
+      case "sessionOpened":
+      case "sessionClosed":
+      case "sessionExited":
+        emitOutput(deviceStoreId, payload);
+        return;
       case "dockerInfo":
         updateDeviceRuntime(deviceStoreId, { docker: payload.containers ?? [] });
         emitDeviceUpdate(deviceStoreId);

@@ -36,6 +36,25 @@ func tmuxSessionExists(name string) bool {
 	return cmd.Run() == nil
 }
 
+// listTmuxSessions reports every tmux session on the host, not just the ones
+// Spectre started. Sessions outlive the agent process, so this — not the
+// in-memory session map — is the source of truth for what can be attached to:
+// after an agent restart the map is empty while the sessions are all still
+// there.
+//
+// tmux exits non-zero when no server is running, which is not an error worth
+// reporting; it just means there are no sessions.
+func listTmuxSessions() []SessionInfo {
+	if !isTmuxAvailable() {
+		return nil
+	}
+	out, err := exec.Command(tmuxPath, "list-sessions", "-F", tmuxListFormat).Output()
+	if err != nil {
+		return nil
+	}
+	return parseTmuxSessions(string(out))
+}
+
 func killTmuxSession(name string) {
 	if !isTmuxAvailable() {
 		return

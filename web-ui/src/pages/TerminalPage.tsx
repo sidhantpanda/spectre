@@ -133,6 +133,7 @@ export default function TerminalPage() {
             apiBase={API_BASE}
             connectionId={agent.connectionId}
             enabled={agent.status === "connected" && !loadError}
+            onLeaveHost={() => navigate("/")}
           />
         )}
       </section>

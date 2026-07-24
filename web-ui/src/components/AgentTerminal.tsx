@@ -1,41 +1,66 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { buildWsUrl } from "../lib/api";
+import { SessionPicker, type SessionInfo } from "./SessionPicker";
+import { SessionExitDialog } from "./SessionExitDialog";
+import { Button } from "./ui/button";
 
 type Props = {
   agentId: string;
   apiBase?: string;
   connectionId?: string;
   enabled?: boolean;
+  /** Called when the user chooses to leave the host (kill or leave running). */
+  onLeaveHost?: () => void;
 };
 
 type TerminalMessage =
   | { type: "output"; data: string; sessionId?: string }
-  | { type: "status"; status: string; connectionId?: string; sessionId?: string }
+  | { type: "status"; status: string; connectionId?: string }
+  | { type: "sessions"; sessions?: SessionInfo[]; tmuxAvailable?: boolean }
+  | { type: "attached"; sessionId: string }
+  | { type: "sessionExited"; sessionId: string }
+  | { type: "sessionClosed"; sessionId: string }
   | { type: "error"; message: string };
 
-export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }: Props) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+/** End-of-transmission — what Ctrl+D sends. */
+const CTRL_D = "\x04";
+
+export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true, onLeaveHost }: Props) {
   const socketRef = useRef<WebSocket | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const reconnectTimer = useRef<number | null>(null);
-  const [status, setStatus] = useState<"disconnected" | "connecting" | "connected" | "error">("disconnected");
-  const [sessionId, setSessionId] = useState(connectionId ?? "");
+  // Output can arrive between attaching and the terminal being mounted; hold it
+  // rather than dropping the first lines of the session.
+  const pendingOutput = useRef<string[]>([]);
+  const activeSessionRef = useRef<string | null>(null);
 
-  // Initialize the terminal once.
+  const [termNode, setTermNode] = useState<HTMLDivElement | null>(null);
+  const [status, setStatus] = useState<"disconnected" | "connecting" | "connected" | "error">("disconnected");
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [tmuxAvailable, setTmuxAvailable] = useState(true);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [exitPromptOpen, setExitPromptOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const send = useCallback((payload: Record<string, unknown>) => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify(payload));
+    }
+  }, []);
+
+  const setActive = useCallback((sessionId: string | null) => {
+    activeSessionRef.current = sessionId;
+    setActiveSessionId(sessionId);
+  }, []);
+
+  // Create the terminal only while a session is attached, so the picker is not
+  // sitting behind a stale, zero-sized xterm instance.
   useEffect(() => {
-    if (termRef.current) return;
-    const safeFit = () => {
-      if (!fitRef.current || !termRef.current || !containerRef.current || !termRef.current.element) return;
-      try {
-        fitRef.current.fit();
-      } catch {
-        // ignore transient sizing errors if terminal not yet mounted
-      }
-    };
+    if (!activeSessionId || !termNode) return;
 
     const term = new Terminal({
       convertEol: true,
@@ -55,47 +80,54 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    term.open(termNode);
     termRef.current = term;
     fitRef.current = fit;
 
-    const node = containerRef.current;
-    if (node) {
-      term.open(node);
-      safeFit();
-    }
-
-    const handleResize = () => {
-      safeFit();
+    const safeFit = () => {
+      if (!fitRef.current || !termRef.current?.element) return;
+      try {
+        fitRef.current.fit();
+      } catch {
+        // ignore transient sizing errors
+      }
     };
-    window.addEventListener("resize", handleResize);
+    safeFit();
 
+    for (const chunk of pendingOutput.current) term.write(chunk);
+    pendingOutput.current = [];
+
+    // Ctrl+D is swallowed here, before it can reach the agent. The shell never
+    // sees it, so nothing has exited yet and the dialog can still offer to keep
+    // the session running.
+    const dataHandler = term.onData((data) => {
+      if (data === CTRL_D) {
+        setExitPromptOpen(true);
+        return;
+      }
+      send({ type: "input", data });
+    });
+
+    window.addEventListener("resize", safeFit);
     return () => {
-      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("resize", safeFit);
+      dataHandler.dispose();
       fitRef.current?.dispose();
       fitRef.current = null;
       termRef.current?.dispose();
       termRef.current = null;
     };
+  }, [activeSessionId, termNode, send]);
+
+  const writeToTerm = useCallback((data: string) => {
+    const term = termRef.current;
+    if (term?.element) term.write(data);
+    else pendingOutput.current.push(data);
   }, []);
 
-  // Register input handler once per agentId change.
+  // Socket lifecycle, independent of which session is attached: the picker and
+  // the terminal share one connection.
   useEffect(() => {
-    const term = termRef.current;
-    if (!term) return;
-    const handler = term.onData((data) => {
-      if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({ type: "input", data }));
-      }
-    });
-    return () => handler.dispose();
-  }, [agentId]);
-
-  // Manage socket lifecycle with reconnection/backoff.
-  useEffect(() => {
-    if (connectionId) setSessionId(connectionId);
-    const term = termRef.current;
-    if (!term) return;
-
     let cancelled = false;
     let backoff = 1000;
 
@@ -116,8 +148,6 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
       return () => {};
     }
 
-    const isTermUsable = () => termRef.current === term && !!term.element?.isConnected;
-
     const connect = async () => {
       if (cancelled) return;
       setStatus("connecting");
@@ -128,10 +158,8 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
       try {
         url = await buildWsUrl(`/terminal?id=${encodeURIComponent(agentId)}`, apiBase);
       } catch {
-        if (isTermUsable()) {
-          term.writeln("\r\n[error] could not authenticate terminal session");
-        }
         setStatus("error");
+        setNotice("Could not authenticate terminal session.");
         return;
       }
       if (cancelled) return;
@@ -139,64 +167,73 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
       const socket = new WebSocket(url);
       socketRef.current = socket;
 
-      if (isTermUsable()) {
-        term.writeln(`\r\n[connecting] ${agentId}`);
-      }
-
       socket.onopen = () => {
         backoff = 1000;
         setStatus("connected");
-        if (isTermUsable()) {
-          term.writeln("\x1b[32mConnected to agent terminal\x1b[0m");
-        }
-        if (fitRef.current) {
-          try {
-            fitRef.current.fit();
-          } catch {
-            /* ignore fit error */
-          }
+        setNotice(null);
+        // Re-attach after a dropped link so the session survives the round trip.
+        if (activeSessionRef.current) {
+          send({ type: "attach", sessionId: activeSessionRef.current });
         }
       };
 
       socket.onmessage = (evt) => {
+        let payload: TerminalMessage;
         try {
-          const payload = JSON.parse(evt.data) as TerminalMessage;
-          if (!isTermUsable()) return;
-
-          if (payload.type === "output") {
-            term.write(payload.data);
-          } else if (payload.type === "status") {
-            if (payload.status === "connected") {
-              setStatus("connected");
-              if (payload.sessionId || payload.connectionId) {
-                setSessionId(payload.sessionId ?? payload.connectionId ?? "");
-              }
-            } else if (payload.status === "connecting") {
-              setStatus("connecting");
-            } else {
-              setStatus("disconnected");
-            }
-            term.writeln(`\r\n[agent status] ${payload.status}`);
-          } else if (payload.type === "error") {
-            term.writeln(`\r\n[error] ${payload.message}`);
-            setStatus("error");
-          }
+          payload = JSON.parse(evt.data) as TerminalMessage;
         } catch {
-          if (isTermUsable()) {
-            term.write(evt.data);
+          return;
+        }
+
+        switch (payload.type) {
+          case "output":
+            writeToTerm(payload.data);
+            return;
+          case "sessions": {
+            const list = payload.sessions ?? [];
+            setSessions(list);
+            setTmuxAvailable(payload.tmuxAvailable ?? false);
+            // Nothing running on the host: open one straight away rather than
+            // showing an empty picker.
+            if (!activeSessionRef.current && list.length === 0) {
+              send({ type: "create" });
+            }
+            return;
           }
+          case "attached":
+            pendingOutput.current = [];
+            setActive(payload.sessionId);
+            setNotice(null);
+            return;
+          case "sessionExited":
+            // The shell ended on its own (an `exit`, or the process died).
+            if (activeSessionRef.current === payload.sessionId) {
+              setActive(null);
+              setNotice("The shell in that session exited.");
+            }
+            send({ type: "listSessions" });
+            return;
+          case "sessionClosed":
+            if (activeSessionRef.current === payload.sessionId) setActive(null);
+            return;
+          case "status":
+            if (payload.status === "connected") setStatus("connected");
+            else if (payload.status === "connecting") setStatus("connecting");
+            else {
+              setStatus("disconnected");
+              setNotice("The agent disconnected.");
+            }
+            return;
+          case "error":
+            setNotice(payload.message);
+            return;
         }
       };
 
       const scheduleReconnect = () => {
         if (cancelled) return;
-        if (socketRef.current === socket) {
-          socketRef.current = null;
-        }
+        if (socketRef.current === socket) socketRef.current = null;
         setStatus("disconnected");
-        if (isTermUsable()) {
-          term.writeln("\r\n[disconnected] retrying...");
-        }
         backoff = Math.min(backoff * 2, 5000);
         reconnectTimer.current = window.setTimeout(() => void connect(), backoff);
       };
@@ -204,9 +241,6 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
       socket.onclose = scheduleReconnect;
       socket.onerror = () => {
         setStatus("error");
-        if (isTermUsable()) {
-          term.writeln("\r\n[error] Unable to reach terminal backend");
-        }
         scheduleReconnect();
       };
     };
@@ -221,22 +255,83 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true }
       }
       cleanupSocket();
     };
-  }, [agentId, apiBase, connectionId, enabled]);
+  }, [agentId, apiBase, connectionId, enabled, send, setActive, writeToTerm]);
+
+  const leaveHost = useCallback(() => {
+    setExitPromptOpen(false);
+    setActive(null);
+    onLeaveHost?.();
+  }, [onLeaveHost, setActive]);
+
+  const handleKill = useCallback(
+    (sessionId: string) => {
+      send({ type: "kill", sessionId });
+      if (activeSessionRef.current === sessionId) leaveHost();
+    },
+    [leaveHost, send],
+  );
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>Terminal</span>
         <span className="flex items-center gap-2">
-          {sessionId && <code className="rounded bg-muted px-2 py-0.5 text-[11px]">session: {sessionId}</code>}
-          <span>{status}</span>
+          {activeSessionId ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={() => {
+                  send({ type: "detach" });
+                  setActive(null);
+                }}
+              >
+                ← Sessions
+              </Button>
+              <code className="rounded bg-muted px-2 py-0.5 text-[11px]">{activeSessionId}</code>
+            </>
+          ) : (
+            <span>Terminal</span>
+          )}
         </span>
+        <span>{status}</span>
       </div>
-      <div
-        ref={containerRef}
-        className="h-[70vh] min-h-[24rem] w-full overflow-hidden rounded-md border bg-black/80"
-        data-testid={`terminal-${agentId}`}
-      />
+
+      {notice && <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">{notice}</p>}
+
+      {activeSessionId ? (
+        <div
+          ref={setTermNode}
+          className="h-[70vh] min-h-[24rem] w-full overflow-hidden rounded-md border bg-black/80"
+          data-testid={`terminal-${agentId}`}
+        />
+      ) : (
+        <SessionPicker
+          sessions={sessions}
+          tmuxAvailable={tmuxAvailable}
+          busy={status !== "connected"}
+          onAttach={(sessionId) => send({ type: "attach", sessionId })}
+          onCreate={() => send({ type: "create" })}
+          onKill={handleKill}
+        />
+      )}
+
+      {exitPromptOpen && activeSessionId && (
+        <SessionExitDialog
+          sessionId={activeSessionId}
+          persistent={tmuxAvailable}
+          onKill={() => handleKill(activeSessionId)}
+          onLeave={() => {
+            send({ type: "detach" });
+            leaveHost();
+          }}
+          onSendEof={() => {
+            setExitPromptOpen(false);
+            send({ type: "input", data: CTRL_D });
+          }}
+          onDismiss={() => setExitPromptOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -117,18 +117,25 @@ func runConnection(host, credential string, deviceInfo *DeviceInfo, fingerprint 
 
 	errCh := make(chan error, 3)
 	startPTY := func(session *ptySession) {
-		go readFromPTY(conn, session, errCh)
+		go readFromPTY(conn, session, sessions, errCh)
 	}
 
+	// Re-attach whatever this process was already running, so a dropped link
+	// does not lose live sessions. Nothing is created here: which session to
+	// open is the user's choice now, made in the UI, and creating one eagerly
+	// would litter every host with an unwanted session on each reconnect.
 	if active := sessions.activeSessions(); len(active) > 0 {
 		log.Printf("re-attaching %d existing session(s)", len(active))
 		for _, s := range active {
 			s.reset()
 			startPTY(s)
 		}
-	} else {
-		session, _ := sessions.reset("spectre")
-		startPTY(session)
+	}
+
+	// Tell the server what is attachable as soon as the link is up, so the UI
+	// can show the picker without waiting for a round trip.
+	if err := sendSessions(conn, sessions); err != nil {
+		return fmt.Errorf("failed to send session list: %w", err)
 	}
 
 	go readFromControl(conn, sessions, errCh, startPTY)
