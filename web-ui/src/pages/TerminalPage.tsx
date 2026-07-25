@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { AgentTerminal } from "../components/AgentTerminal";
@@ -11,7 +11,7 @@ import { getApiBase } from "../lib/api";
 const API_BASE = getApiBase();
 
 export default function TerminalPage() {
-  const { id } = useParams<{ id: string }>();
+  const { deviceId: id, sessionId } = useParams<{ deviceId: string; sessionId: string }>();
   const navigate = useNavigate();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -104,6 +104,20 @@ export default function TerminalPage() {
   const currentId = agent?.id ?? id ?? "";
   const displayId = agent ? agent.deviceId ?? agent.id : id ?? "";
 
+  // The attached session lives in the URL, so a terminal can be linked to and
+  // reopened directly. Attaching pushes a new entry (Back returns to the
+  // picker); detaching replaces it, so Back does not re-attach what the user
+  // just left.
+  const handleSessionChange = useCallback(
+    (nextSessionId: string | null) => {
+      if ((nextSessionId ?? undefined) === sessionId) return;
+      const base = `/agent/${encodeURIComponent(currentId)}`;
+      if (nextSessionId) navigate(`${base}/${encodeURIComponent(nextSessionId)}`);
+      else navigate(base, { replace: true });
+    },
+    [currentId, navigate, sessionId],
+  );
+
   return (
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b bg-card/60 backdrop-blur supports-[backdrop-filter]:bg-card/60">
@@ -133,6 +147,8 @@ export default function TerminalPage() {
             apiBase={API_BASE}
             connectionId={agent.connectionId}
             enabled={agent.status === "connected" && !loadError}
+            sessionId={sessionId ?? null}
+            onSessionChange={handleSessionChange}
             onLeaveHost={() => navigate("/")}
           />
         )}

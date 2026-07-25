@@ -16,7 +16,8 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
           <Routes>
             <Route path="/" element={<App />} />
             <Route path="/enroll" element={<EnrollPage />} />
-            <Route path="/agent/:id" element={<TerminalPage />} />
+            <Route path="/agent/:deviceId" element={<TerminalPage />} />
+            <Route path="/agent/:deviceId/:sessionId" element={<TerminalPage />} />
           </Routes>
         </BrowserRouter>
       </AuthGate>

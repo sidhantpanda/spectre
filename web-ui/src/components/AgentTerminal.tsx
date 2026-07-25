@@ -12,6 +12,10 @@ type Props = {
   apiBase?: string;
   connectionId?: string;
   enabled?: boolean;
+  /** Session to attach to, taken from the route. null shows the picker. */
+  sessionId?: string | null;
+  /** Reports the session the terminal moved to, so the route can follow it. */
+  onSessionChange?: (sessionId: string | null) => void;
   /** Called when the user chooses to leave the host (kill or leave running). */
   onLeaveHost?: () => void;
 };
@@ -28,7 +32,15 @@ type TerminalMessage =
 /** End-of-transmission — what Ctrl+D sends. */
 const CTRL_D = "\x04";
 
-export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true, onLeaveHost }: Props) {
+export function AgentTerminal({
+  agentId,
+  apiBase,
+  connectionId,
+  enabled = true,
+  sessionId: routeSessionId = null,
+  onSessionChange,
+  onLeaveHost,
+}: Props) {
   const socketRef = useRef<WebSocket | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -37,10 +49,21 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true, 
   // rather than dropping the first lines of the session.
   const pendingOutput = useRef<string[]>([]);
   const activeSessionRef = useRef<string | null>(null);
+  // The route drives which session is attached; kept in a ref so the socket
+  // handlers can read it without being torn down on every navigation.
+  const routeSessionRef = useRef<string | null>(routeSessionId);
+  routeSessionRef.current = routeSessionId;
+  const onSessionChangeRef = useRef(onSessionChange);
+  onSessionChangeRef.current = onSessionChange;
+  // The last route value acted on. A navigation lands a render later than the
+  // state change that triggered it, so without this the terminal would see its
+  // own not-yet-applied navigation as the user asking for something else.
+  const handledRouteRef = useRef<string | null | undefined>(undefined);
 
   const [termNode, setTermNode] = useState<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<"disconnected" | "connecting" | "connected" | "error">("disconnected");
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [tmuxAvailable, setTmuxAvailable] = useState(true);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [exitPromptOpen, setExitPromptOpen] = useState(false);
@@ -55,6 +78,7 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true, 
   const setActive = useCallback((sessionId: string | null) => {
     activeSessionRef.current = sessionId;
     setActiveSessionId(sessionId);
+    if (routeSessionRef.current !== sessionId) onSessionChangeRef.current?.(sessionId);
   }, []);
 
   // Create the terminal only while a session is attached, so the picker is not
@@ -201,6 +225,10 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true, 
             sessionId: activeSessionRef.current,
             ...(term ? { cols: term.cols, rows: term.rows } : {}),
           });
+        } else {
+          // An attach the dropped socket never answered is still owed to the
+          // route; let the sync effect issue it again.
+          handledRouteRef.current = undefined;
         }
       };
 
@@ -219,10 +247,12 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true, 
           case "sessions": {
             const list = payload.sessions ?? [];
             setSessions(list);
+            setSessionsLoaded(true);
             setTmuxAvailable(payload.tmuxAvailable ?? false);
             // Nothing running on the host: open one straight away rather than
-            // showing an empty picker.
-            if (!activeSessionRef.current && list.length === 0) {
+            // showing an empty picker. A route that names a session is left to
+            // the sync effect below, which reports a dead link instead.
+            if (!activeSessionRef.current && !routeSessionRef.current && list.length === 0) {
               send({ type: "create" });
             }
             return;
@@ -284,6 +314,56 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true, 
     };
   }, [agentId, apiBase, connectionId, enabled, send, setActive, writeToTerm]);
 
+  // Picking a session only moves the route; the effect below does the attaching
+  // so every entry point (click, link, reload) takes the same path.
+  const requestSession = useCallback(
+    (sessionId: string) => {
+      if (onSessionChangeRef.current) onSessionChangeRef.current(sessionId);
+      else send({ type: "attach", sessionId });
+    },
+    [send],
+  );
+
+  // Follow the route: a link, a reload, or the Back button all end up here, and
+  // this is the only place an attach/detach is issued for them. Only a *move* of
+  // the route acts; the terminal reporting where it already is must not, or
+  // leaving a session would immediately re-attach to it.
+  useEffect(() => {
+    if (status !== "connected") return;
+    if (handledRouteRef.current === routeSessionId) return;
+
+    if (routeSessionId === activeSessionId) {
+      handledRouteRef.current = routeSessionId;
+      return;
+    }
+
+    if (!routeSessionId) {
+      handledRouteRef.current = routeSessionId;
+      send({ type: "detach" });
+      setActive(null);
+      return;
+    }
+
+    // Attach only to a session the host actually reports, so a stale link
+    // cannot silently spawn a fresh shell under a dead session's name. Left
+    // unhandled until the list arrives, so it is retried then.
+    if (!sessionsLoaded) return;
+    handledRouteRef.current = routeSessionId;
+
+    if (!sessions.some((session) => session.id === routeSessionId)) {
+      setNotice("That session is no longer running on this host.");
+      setActive(null);
+      return;
+    }
+
+    const term = termRef.current;
+    send({
+      type: "attach",
+      sessionId: routeSessionId,
+      ...(term ? { cols: term.cols, rows: term.rows } : {}),
+    });
+  }, [activeSessionId, routeSessionId, send, sessions, sessionsLoaded, setActive, status]);
+
   const leaveHost = useCallback(() => {
     setExitPromptOpen(false);
     setActive(null);
@@ -337,7 +417,7 @@ export function AgentTerminal({ agentId, apiBase, connectionId, enabled = true, 
           sessions={sessions}
           tmuxAvailable={tmuxAvailable}
           busy={status !== "connected"}
-          onAttach={(sessionId) => send({ type: "attach", sessionId })}
+          onAttach={requestSession}
           onCreate={() => send({ type: "create" })}
           onKill={handleKill}
         />
