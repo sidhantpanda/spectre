@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Copy, Cpu, Gauge, HardDrive, MemoryStick, Monitor, Network, Trash2 } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
+import { AgentListItem } from "./components/AgentListItem";
 import { AgentStatusDot } from "./components/AgentStatusDot";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { VersionFooter } from "./components/VersionFooter";
 import type { Agent } from "./state/agents";
 import {
+  deviceKey,
   fetchAgents,
   refreshDockerInfo,
   refreshNetworkInfo,
@@ -29,42 +31,6 @@ import {
 } from "./state/enrollment";
 
 const API_BASE = getApiBase();
-
-export function formatTimestamp(ts: number) {
-  const date = new Date(ts);
-  return date.toLocaleTimeString();
-}
-
-function formatBytes(bytes?: number) {
-  if (!bytes || bytes <= 0) return "n/a";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const value = bytes / Math.pow(1024, exponent);
-  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[exponent]}`;
-}
-
-function formatDisk(free?: number, total?: number) {
-  if (!free && !total) return "n/a";
-  if (free && total) return `${formatBytes(free)} free / ${formatBytes(total)} total`;
-  if (total) return `${formatBytes(total)} total`;
-  return formatBytes(free);
-}
-
-function formatList(values?: string[]) {
-  if (!values || values.length === 0) return "none";
-  return values.join(", ");
-}
-
-function deviceKey(agent: Agent) {
-  // The server already returns one row per physical device; this is a safety
-  // net for incremental events. Prefer the stable hardware identity so a
-  // machine re-enrolled with a new key still collapses to one row.
-  return agent.identity ?? agent.deviceId ?? agent.id;
-}
-
-function displayDeviceId(agent: Agent) {
-  return deviceKey(agent);
-}
 
 function dedupeAgents(list: Agent[]) {
   const priority: Record<Agent["status"], number> = {
@@ -362,129 +328,13 @@ function App() {
             ))}
 
             {dedupedAgents.map((agent) => (
-              <div
+              <AgentListItem
                 key={agent.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => navigate(`/agent/${agent.id}`)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    navigate(`/agent/${agent.id}`);
-                  }
-                }}
-                className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border bg-muted/40 p-4 text-left transition hover:border-primary"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <AgentStatusDot status={agent.status} />
-                      {agent.agentVersion && (
-                        <Badge variant="outline" className="font-mono text-[11px]">
-                          {agent.agentVersion}
-                        </Badge>
-                      )}
-                      <p className="font-medium">{agent.fingerprint?.hostname ?? displayDeviceId(agent)}</p>
-                      {agent.status === "connecting" && (
-                        <Badge variant="outline" className="border-amber-500/50 text-[11px]">
-                          Approved — connecting
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground">{displayDeviceId(agent)}</p>
-                    <p className="text-sm text-muted-foreground">{agent.address}</p>
-                    <div className="flex flex-col gap-2 pt-2">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">System Info</p>
-                      <div className="flex flex-wrap items-center gap-2 text-xs">
-                        {agent.systemInfo ? (
-                          <>
-                            <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
-                              <Monitor size={14} /> {agent.systemInfo.os}
-                              {agent.systemInfo.version && (
-                                <span className="text-muted-foreground"> {agent.systemInfo.version}</span>
-                              )}
-                            </span>
-                            <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
-                              <Cpu size={14} /> {agent.systemInfo.cpu || "CPU"}
-                            </span>
-                            <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
-                              <Gauge size={14} /> {agent.systemInfo.cores} cores ({agent.systemInfo.arch})
-                            </span>
-                            <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
-                              <MemoryStick size={14} /> {formatBytes(agent.systemInfo.memoryBytes)}
-                            </span>
-                            <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
-                              <HardDrive size={14} /> {formatDisk(agent.systemInfo.diskFreeBytes, agent.systemInfo.diskTotalBytes)}
-                            </span>
-                          </>
-                        ) : agent.systemInfoError ? (
-                          <span className="text-xs text-destructive">System: {agent.systemInfoError}</span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">System info pending...</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-2 pt-2">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Network Info</p>
-                      <div className="flex flex-wrap items-center gap-2 text-xs">
-                        {agent.networkInfo ? (
-                          <>
-                            <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
-                              <Network size={14} /> IPv4: {formatList(agent.networkInfo.ipv4)}
-                            </span>
-                            {/* <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-foreground">
-                              <Network size={14} /> IPv6: {formatList(agent.networkInfo.ipv6)}
-                            </span> */}
-                          </>
-                        ) : agent.networkInfoError ? (
-                          <span className="text-xs text-destructive">Network: {agent.networkInfoError}</span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">Network info pending...</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-2 pt-2">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Docker Containers
-                      </p>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {agent.docker && agent.docker.length > 0 ? (
-                          (agent.docker.sort((a, b) => a.name.localeCompare(b.name))).map((container) => (
-                            <Badge key={container.name} variant="outline" className="text-xs font-normal">
-                              <span className="font-medium text-foreground">{container.name}</span>
-                              <span className="ml-1 text-muted-foreground">
-                                {(container.ports ?? []).length > 0 ? container.ports.join(", ") : "no ports"}
-                              </span>
-                            </Badge>
-                          ))
-                        ) : agent.dockerError ? (
-                          <span className="text-xs text-destructive">Docker: {agent.dockerError}</span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">Docker: no containers reported</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-2 text-right text-xs text-muted-foreground">
-                    <p>{agent.status === "connecting" ? "Enrolled" : "Last seen"}: {formatTimestamp(agent.lastSeen)}</p>
-                    {agent.status !== "connected" && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={removingId === agent.id}
-                        className="h-7 gap-1 text-destructive hover:text-destructive"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRemoveAgent(agent);
-                        }}
-                      >
-                        <Trash2 size={14} />
-                        {removingId === agent.id ? "Removing..." : "Remove"}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
+                agent={agent}
+                removing={removingId === agent.id}
+                onOpen={() => navigate(`/agent/${agent.id}`)}
+                onRemove={() => handleRemoveAgent(agent)}
+              />
             ))}
           </CardContent>
         </Card>

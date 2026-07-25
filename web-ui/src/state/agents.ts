@@ -62,6 +62,21 @@ export type Agent = {
   networkInfoError?: string;
 };
 
+/**
+ * The physical machine an agent row belongs to.
+ *
+ * The server already returns one row per device; this is a safety net for
+ * incremental events. The stable hardware identity comes first, so a machine
+ * re-enrolled with a new key still collapses to one entry.
+ */
+export function deviceKey(agent: Agent) {
+  return agent.identity ?? agent.deviceId ?? agent.id;
+}
+
+export function displayDeviceId(agent: Agent) {
+  return deviceKey(agent);
+}
+
 export async function fetchAgents(apiBase: string = API_BASE): Promise<Agent[]> {
   const res = await authFetch(`${apiBase}/agents`);
   if (!res.ok) throw new Error("failed to fetch agents");
