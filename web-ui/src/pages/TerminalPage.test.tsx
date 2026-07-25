@@ -142,6 +142,12 @@ describe("TerminalPage session routing", () => {
     await waitFor(() => expect(sentTypes(socket)).toContain("attach"));
     act(() => socket.emit({ type: "attached", sessionId: SESSION.id }));
     expect(await screen.findByTestId("terminal-dev-1")).toBeInTheDocument();
+
+    // Opening a session means wanting to type in it: the first keystroke should
+    // land in the terminal without clicking it first.
+    await waitFor(() =>
+      expect(document.activeElement).toHaveClass("xterm-helper-textarea"),
+    );
   });
 
   it("returns to the picker after a session it auto-created", async () => {

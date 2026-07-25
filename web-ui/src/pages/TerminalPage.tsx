@@ -119,7 +119,9 @@ export default function TerminalPage() {
   );
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
+    // Column layout so the footer sits on the bottom edge of a short page and
+    // scrolls away below a long one, rather than being pinned to the viewport.
+    <main className="flex min-h-screen flex-col bg-background text-foreground">
       <header className="border-b bg-card/60 backdrop-blur supports-[backdrop-filter]:bg-card/60">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
@@ -137,7 +139,7 @@ export default function TerminalPage() {
           </div>
         </div>
       </header>
-      <section className="mx-auto max-w-5xl px-6 py-6">
+      <section className="mx-auto w-full max-w-5xl flex-1 px-6 py-6">
         {!agent && !loadError && <p className="text-sm text-muted-foreground">Agent not found.</p>}
         {loadError && <p className="text-sm text-destructive">{loadError}</p>}
         {agent && (

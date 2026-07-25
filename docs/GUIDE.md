@@ -44,6 +44,8 @@ A machine is only trusted once you say so. There are two ways to say it:
 
 Both end in the same place: the machine holds a long-lived **device key**, and the enrollment credential is spent. The device key is stored `0600` on the machine and only ever as a hash on the server.
 
+A machine waiting for interactive approval appears on the dashboard's machine list as soon as it asks — pushed over the dashboard's event socket, no reload — marked **Pending approval** with a yellow dot, and is approved or rejected from that row. (`/enroll` is still there for typing a code in by hand.) Once approved it becomes a real device row, yellow until its first connection lands, and red only after it has connected and then dropped.
+
 ## Production checklist
 
 Spectre gives a browser a root shell. Before exposing it:
@@ -185,6 +187,8 @@ sudo spectre-agent up --host wss://spectre.example.com
 ```
 
 `up` enrols the machine, stores the device key, installs a service, and starts it. The enrollment credential is never written into the service file: the agent enrols once, up front, and the service runs with only `--host`.
+
+The key is written to the service's own state directory (`/var/lib/spectre-agent`, or `SPECTRE_AGENT_HOME` if you set it) and handed to the account the service runs as — the same place the service reads it from. A machine you had already enrolled by hand keeps its device key: `up` carries it over rather than enrolling the machine a second time.
 
 > **TLS:** a bare host (`--host spectre.example.com`) defaults to `wss://`. Plaintext `ws://` to anything other than localhost logs a loud warning — terminal I/O and the device key would be exposed to the network.
 

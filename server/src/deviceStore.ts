@@ -186,6 +186,19 @@ function importLegacyJson(dataDir: string) {
   }
 }
 
+// Machines waiting for approval are shown live on the dashboard, so anything
+// that adds, approves, denies or expires one has to say so.
+const pendingListeners: Set<() => void> = new Set();
+
+export function onPendingDevicesChange(listener: () => void) {
+  pendingListeners.add(listener);
+  return () => pendingListeners.delete(listener);
+}
+
+function emitPendingChange() {
+  for (const listener of pendingListeners) listener();
+}
+
 /** Drops expired pending enrollments and spent-and-expired auth keys. */
 export function prune() {
   if (!initialized) return;
@@ -195,8 +208,10 @@ export function prune() {
   const expired = db.prepare("SELECT id FROM pending_devices WHERE expires_at <= ? OR claimed = 1").all(ts) as { id: string }[];
   for (const row of expired) issuedKeys.delete(row.id);
 
-  db.prepare("DELETE FROM pending_devices WHERE expires_at <= ? OR claimed = 1").run(ts);
+  const dropped = db.prepare("DELETE FROM pending_devices WHERE expires_at <= ? OR claimed = 1").run(ts);
   db.prepare("DELETE FROM auth_keys WHERE expires_at <= ? AND uses = 0").run(ts);
+  // prune() runs from inside the pending reads, so only announce a real change.
+  if (Number(dropped.changes) > 0) emitPendingChange();
 }
 
 // --- Device identity -------------------------------------------------------
@@ -334,6 +349,7 @@ export function createPendingDevice(info: { hostname?: string; deviceId?: string
      VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
   ).run(uuid(), userCode, hash(pollToken), info.hostname ?? null, info.deviceId ?? null, ts, expiresAt);
 
+  emitPendingChange();
   return { userCode, pollToken, expiresAt };
 }
 
@@ -392,6 +408,7 @@ export function approvePendingDevice(userCode: string, name?: string): PublicDev
   db.prepare("UPDATE pending_devices SET approved_at = ? WHERE id = ?").run(now(), row.id);
   issuedKeys.set(row.id, deviceKey);
 
+  emitPendingChange();
   return getPublicDevice(device.id)!;
 }
 
@@ -402,6 +419,7 @@ export function denyPendingDevice(userCode: string): boolean {
   if (rows.length === 0) return false;
   for (const r of rows) issuedKeys.delete(r.id);
   db.prepare("DELETE FROM pending_devices WHERE user_code = ?").run(normalized);
+  emitPendingChange();
   return true;
 }
 
@@ -572,7 +590,11 @@ function rowToAgentRecord(row: DeviceRow): AgentRecord {
     id: row.id,
     connectionId: row.id,
     address: row.last_address ?? "",
-    status: row.status === "connected" ? "connected" : "disconnected",
+    // first_seen is stamped on the device's first hello. A row that has one but
+    // no live socket has genuinely dropped; one without has only just been
+    // issued a credential and is still on its way in, which is not the same
+    // thing and should not read as a dead machine.
+    status: row.status === "connected" ? "connected" : row.first_seen ? "disconnected" : "connecting",
     lastSeen: row.last_seen,
     deviceId: row.agent_device_id ?? undefined,
     identity: row.identity ?? undefined,

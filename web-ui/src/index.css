@@ -134,6 +134,18 @@
     animation-duration: 1.1s;
   }
 
+  /* Waiting on a human, not on the network: yellow, and a slower pulse than
+     "connecting" so the two read differently at a glance. */
+  .status-dot--pending {
+    background-color: #eab308;
+    box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.16), 0 0 12px rgba(234, 179, 8, 0.5);
+  }
+
+  .status-dot--pending::after {
+    background-color: rgba(234, 179, 8, 0.55);
+    animation-duration: 2.4s;
+  }
+
   .status-dot--disconnected {
     background-color: #ef4444;
     box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.16), 0 0 12px rgba(239, 68, 68, 0.5);

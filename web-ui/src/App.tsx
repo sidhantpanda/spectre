@@ -18,7 +18,9 @@ import {
 } from "./state/agents";
 import { getApiBase } from "./lib/api";
 import {
+  approveDevice,
   createAuthKey,
+  denyDevice,
   enrollCommand,
   fetchConnectHost,
   listPendingDevices,
@@ -66,6 +68,9 @@ function displayDeviceId(agent: Agent) {
 
 function dedupeAgents(list: Agent[]) {
   const priority: Record<Agent["status"], number> = {
+    // "pending" never reaches here — it belongs to machines that have no device
+    // row yet — but the map has to cover the type.
+    pending: 0,
     disconnected: 0,
     connecting: 1,
     connected: 2,
@@ -96,6 +101,8 @@ function App() {
   const [copied, setCopied] = useState(false);
   const [connectHost, setConnectHost] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [pendingBusy, setPendingBusy] = useState<string | null>(null);
+  const [pendingError, setPendingError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   async function loadAgents() {
@@ -113,12 +120,14 @@ function App() {
     refreshNetworkInfo(API_BASE);
     loadAgents();
 
+    // The socket pushes these as they happen; the poll is a fallback for a
+    // dropped socket, not the primary path.
     const loadPending = () =>
       listPendingDevices()
         .then(setPending)
         .catch(() => setPending([]));
     loadPending();
-    const pendingTimer = setInterval(loadPending, 5000);
+    const pendingTimer = setInterval(loadPending, 15000);
 
     fetchConnectHost().then(setConnectHost).catch(() => setConnectHost(null));
 
@@ -136,6 +145,7 @@ function App() {
           return next;
         }),
       API_BASE,
+      { onPending: setPending },
     );
     return () => {
       clearInterval(pendingTimer);
@@ -169,6 +179,35 @@ function App() {
     }
   }
 
+  // Approving mints the machine's credential, so the row it becomes arrives on
+  // the next agent refresh rather than from the pending list.
+  async function handleApprovePending(device: PendingDevice) {
+    setPendingBusy(device.userCode);
+    setPendingError(null);
+    try {
+      await approveDevice(device.userCode, device.hostname);
+      setPending((prev) => prev.filter((p) => p.userCode !== device.userCode));
+      await loadAgents();
+    } catch (err) {
+      setPendingError((err as Error).message);
+    } finally {
+      setPendingBusy(null);
+    }
+  }
+
+  async function handleRejectPending(device: PendingDevice) {
+    setPendingBusy(device.userCode);
+    setPendingError(null);
+    try {
+      await denyDevice(device.userCode);
+      setPending((prev) => prev.filter((p) => p.userCode !== device.userCode));
+    } catch (err) {
+      setPendingError((err as Error).message);
+    } finally {
+      setPendingBusy(null);
+    }
+  }
+
   async function handleCreateAuthKey() {
     setIsCreatingKey(true);
     setKeyError(null);
@@ -195,7 +234,10 @@ function App() {
   }
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
+    // A column at least as tall as the viewport, with the content growing to
+    // fill it: the footer lands on the bottom edge on a short page and below
+    // the fold on a long one, without being pinned there.
+    <main className="flex min-h-screen flex-col bg-background text-foreground">
       <header className="border-b bg-card/60 backdrop-blur supports-[backdrop-filter]:bg-card/60">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
           <div>
@@ -209,19 +251,11 @@ function App() {
         </div>
       </header>
 
-      <section className="mx-auto max-w-5xl px-6 py-10 space-y-8">
+      <section className="mx-auto w-full max-w-5xl flex-1 px-6 py-10 space-y-8">
         {pending.length > 0 && (
-          <div className="flex items-center justify-between gap-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
-            <p className="text-sm">
-              {pending.length} machine{pending.length === 1 ? "" : "s"} waiting for approval
-              <span className="ml-2 font-mono text-xs text-muted-foreground">
-                {pending.map((p) => p.userCode).join(", ")}
-              </span>
-            </p>
-            <Button size="sm" onClick={() => navigate("/enroll")}>
-              Review
-            </Button>
-          </div>
+          <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+            {pending.length} machine{pending.length === 1 ? "" : "s"} waiting for approval — approve or reject below.
+          </p>
         )}
 
         <Card>
@@ -260,7 +294,11 @@ function App() {
                 {keyError && <p className="text-sm text-destructive">{keyError}</p>}
                 <p className="text-xs text-muted-foreground">
                   No key handy? Run <code className="font-mono">spectre-agent up --host …</code> on the machine and
-                  approve the code it prints.
+                  approve the code it prints — it appears in the list below, or{" "}
+                  <button type="button" className="underline underline-offset-4" onClick={() => navigate("/enroll")}>
+                    enter it by hand
+                  </button>
+                  .
                 </p>
               </div>
             )}
@@ -273,7 +311,56 @@ function App() {
             <CardDescription>Live connections from the control server into agent API servers.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {dedupedAgents.length === 0 && <p className="text-sm text-muted-foreground">No connections yet.</p>}
+            {dedupedAgents.length === 0 && pending.length === 0 && (
+              <p className="text-sm text-muted-foreground">No connections yet.</p>
+            )}
+
+            {pendingError && <p className="text-sm text-destructive">{pendingError}</p>}
+
+            {/* Machines that have asked to join. They have no credential yet, so
+                there is nothing to open — only a decision to make. */}
+            {pending.map((device) => (
+              <div
+                key={device.id}
+                className="flex flex-col gap-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <AgentStatusDot status="pending" />
+                    <p className="font-medium">{device.hostname ?? "unknown host"}</p>
+                    <Badge variant="outline" className="border-amber-500/50 text-[11px]">
+                      Pending approval
+                    </Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Code <span className="font-mono tracking-widest text-foreground">{device.userCode}</span> — confirm
+                    it matches what the machine printed.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Expires at {new Date(device.expiresAt).toLocaleTimeString()}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    size="sm"
+                    disabled={pendingBusy === device.userCode}
+                    onClick={() => void handleApprovePending(device)}
+                  >
+                    {pendingBusy === device.userCode ? "Working..." : "Approve"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-destructive hover:text-destructive"
+                    disabled={pendingBusy === device.userCode}
+                    onClick={() => void handleRejectPending(device)}
+                  >
+                    Reject
+                  </Button>
+                </div>
+              </div>
+            ))}
+
             {dedupedAgents.map((agent) => (
               <div
                 key={agent.id}
@@ -298,6 +385,11 @@ function App() {
                         </Badge>
                       )}
                       <p className="font-medium">{agent.fingerprint?.hostname ?? displayDeviceId(agent)}</p>
+                      {agent.status === "connecting" && (
+                        <Badge variant="outline" className="border-amber-500/50 text-[11px]">
+                          Approved — connecting
+                        </Badge>
+                      )}
                     </div>
                     <p className="text-sm text-muted-foreground">{displayDeviceId(agent)}</p>
                     <p className="text-sm text-muted-foreground">{agent.address}</p>
@@ -374,8 +466,8 @@ function App() {
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-2 text-right text-xs text-muted-foreground">
-                    <p>Last seen: {formatTimestamp(agent.lastSeen)}</p>
-                    {agent.status === "disconnected" && (
+                    <p>{agent.status === "connecting" ? "Enrolled" : "Last seen"}: {formatTimestamp(agent.lastSeen)}</p>
+                    {agent.status !== "connected" && (
                       <Button
                         variant="ghost"
                         size="sm"

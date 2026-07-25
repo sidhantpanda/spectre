@@ -1,9 +1,15 @@
 import { buildWsUrl, getApiBase } from "../lib/api";
 import { authFetch } from "../lib/auth";
+import type { PendingDevice } from "./enrollment";
 
 const API_BASE = getApiBase();
 
-export type AgentStatus = "connecting" | "connected" | "disconnected";
+/**
+ * "pending" is not a state the server reports for a device — it belongs to a
+ * machine that has asked to be added and has no credential yet. The dashboard
+ * lists those alongside real devices, so the dot and the label need it too.
+ */
+export type AgentStatus = "pending" | "connecting" | "connected" | "disconnected";
 
 export type AgentFingerprint = {
   hostname: string;
@@ -64,12 +70,15 @@ export async function fetchAgents(apiBase: string = API_BASE): Promise<Agent[]> 
 
 export type AgentEvent =
   | { type: "agents"; agents: Agent[] }
-  | { type: "agent"; agent: Agent };
+  | { type: "agent"; agent: Agent }
+  | { type: "pending"; pending: PendingDevice[] };
 
 export type AgentEventHandlers = {
   onOpen?: () => void;
   onClose?: () => void;
   onError?: () => void;
+  /** Machines waiting for approval, pushed whenever the set changes. */
+  onPending?: (pending: PendingDevice[]) => void;
 };
 
 export type AgentEventSubscription = { close: () => void };
@@ -109,6 +118,8 @@ export function subscribeToAgentEvents(
             onAgents(payload.agents);
           } else if (payload.type === "agent") {
             onAgentUpdate(payload.agent);
+          } else if (payload.type === "pending") {
+            handlers.onPending?.(payload.pending ?? []);
           }
         } catch {
           // ignore malformed events

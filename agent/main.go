@@ -148,18 +148,20 @@ func showStatus() error {
 		fmt.Println("  Status:    not running")
 	}
 
-	deviceInfo, err := ensureDeviceInfo()
-	if err == nil {
+	deviceInfo, infoPath, found := loadDeviceInfo()
+	if found {
 		fmt.Printf("  Device ID: %s\n", deviceInfo.DeviceID)
 		if deviceInfo.DeviceKey != "" {
 			fmt.Println("  Enrolled:  yes")
 		} else {
 			fmt.Println("  Enrolled:  no")
 		}
-	}
-
-	if path, _ := deviceInfoPath(); path != "" {
-		fmt.Printf("  Data dir:  %s\n", filepath.Dir(path))
+		fmt.Printf("  Data dir:  %s\n", filepath.Dir(infoPath))
+	} else {
+		fmt.Println("  Enrolled:  no")
+		if path, _ := deviceInfoPath(); path != "" {
+			fmt.Printf("  Data dir:  %s (empty)\n", filepath.Dir(path))
+		}
 	}
 
 	if svcStatus := serviceStatus(); svcStatus != "" {

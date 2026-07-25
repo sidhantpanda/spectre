@@ -16,6 +16,7 @@ import {
   listConnections,
   listDevices,
   listPendingDevices,
+  onPendingDevicesChange,
   pollPendingDevice,
   recordDeviceConnected,
   recordDeviceDisconnected,
@@ -150,6 +151,17 @@ describe("device identity (the reconnect fix)", () => {
     expect(records[0].status).toBe("connected");
   });
 
+  it("reports a device that has never connected as connecting, not disconnected", () => {
+    // Between being issued a credential and its first hello, a machine is on its
+    // way in. Showing it as disconnected reads as a machine that has died.
+    const enrolled = redeemAuthKey(createAuthKey({}).key)!;
+    expect(listAgentRecords()[0].status).toBe("connecting");
+
+    const conn = recordDeviceConnected(enrolled.device.id, { address: "1.2.3.4", fingerprint: fingerprint() });
+    recordDeviceDisconnected(enrolled.device.id, conn.connectionId, "closed");
+    expect(listAgentRecords()[0].status).toBe("disconnected");
+  });
+
   it("collapses a machine re-enrolled with a new key into one device", () => {
     const fp = fingerprint(); // same hardware, same machine-id
 
@@ -227,6 +239,21 @@ describe("interactive approval", () => {
     expect(denyPendingDevice(pending.userCode)).toBe(true);
     expect(pollPendingDevice(pending.pollToken).status).toBe("expired");
     expect(listPendingDevices()).toHaveLength(0);
+  });
+
+  it("announces every change to the pending set", () => {
+    const seen: number[] = [];
+    const unsubscribe = onPendingDevicesChange(() => seen.push(listPendingDevices().length));
+
+    const first = createPendingDevice({ hostname: "build-box" });
+    const second = createPendingDevice({ hostname: "laptop" });
+    denyPendingDevice(second.userCode);
+    approvePendingDevice(first.userCode);
+
+    // create, create, deny, approve — the dashboard needs all four, or a machine
+    // sits on the list after it has been dealt with.
+    expect(seen).toEqual([1, 2, 1, 0]);
+    unsubscribe();
   });
 
   it("never stores the poll token or issued key in the clear", () => {

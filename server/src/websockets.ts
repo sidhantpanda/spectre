@@ -3,7 +3,14 @@ import WebSocket, { type RawData, WebSocketServer } from "ws";
 import { v4 as uuid } from "uuid";
 import { currentAgent, listAgents, onAgentOutput, onAgentStatusChange, pushToAgent, registerInboundAgent } from "./agentRegistry";
 import { extractTicketFromUrl, isAuthEnabled, redeemWsTicket } from "./auth";
-import { findDeviceByKey, isInitialized as isDeviceStoreInitialized, redeemAuthKey, touchDevice } from "./deviceStore";
+import {
+  findDeviceByKey,
+  isInitialized as isDeviceStoreInitialized,
+  listPendingDevices,
+  onPendingDevicesChange,
+  redeemAuthKey,
+  touchDevice,
+} from "./deviceStore";
 import { type AgentRecord, type ControlMessage } from "./types";
 import { inboundAddress, safePath } from "./utils/net";
 
@@ -59,6 +66,21 @@ function broadcastAgentEvent(record: AgentRecord) {
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "agent", agent: record }));
     }
+  }
+}
+
+/**
+ * Machines waiting for approval, pushed to every open dashboard.
+ *
+ * They are not devices yet — there is no credential and no socket — but they
+ * belong on the same list as the machines that are, or a new machine sits
+ * unnoticed until someone reloads the page.
+ */
+function broadcastPendingDevices() {
+  if (!isDeviceStoreInitialized()) return;
+  const raw = JSON.stringify({ type: "pending", pending: listPendingDevices() });
+  for (const socket of agentEventClients) {
+    if (socket.readyState === WebSocket.OPEN) socket.send(raw);
   }
 }
 
@@ -206,6 +228,9 @@ function handleAgentEventStream(agentEventsWss: WebSocketServer) {
   agentEventsWss.on("connection", (socket: WebSocket) => {
     agentEventClients.add(socket);
     socket.send(JSON.stringify({ type: "agents", agents: listAgents() }));
+    if (isDeviceStoreInitialized()) {
+      socket.send(JSON.stringify({ type: "pending", pending: listPendingDevices() }));
+    }
     socket.on("close", () => agentEventClients.delete(socket));
   });
 }
@@ -332,6 +357,8 @@ export function attachWebSockets(httpServer: HttpServer) {
   });
 
   onAgentOutput((agentId, payload) => broadcastToUi(agentId, payload));
+
+  onPendingDevicesChange(() => broadcastPendingDevices());
 
   const uiWss = new WebSocketServer({ noServer: true, maxPayload: MAX_UI_MESSAGE_BYTES });
   const agentEventsWss = new WebSocketServer({ noServer: true, maxPayload: MAX_UI_MESSAGE_BYTES });

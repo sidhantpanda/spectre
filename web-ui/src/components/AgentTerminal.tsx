@@ -88,6 +88,7 @@ export function AgentTerminal({
 
     const term = new Terminal({
       convertEol: true,
+      cursorBlink: true,
       fontSize: 13,
       fontFamily: 'ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
       theme: {
@@ -144,6 +145,11 @@ export function AgentTerminal({
       send({ type: "input", data });
     });
 
+    // Opening a session is a request to type in it: put the caret in the
+    // terminal so the first keystroke lands there and the cursor is visible,
+    // rather than making the user click the black rectangle first.
+    term.focus();
+
     // A ResizeObserver catches everything a window listener misses: the sidebar
     // opening, the notice banner appearing, a phone rotating, the container's
     // own vh-based height changing.
@@ -162,6 +168,13 @@ export function AgentTerminal({
       termRef.current = null;
     };
   }, [activeSessionId, termNode, send]);
+
+  // The exit dialog takes focus while it is open; hand it back on dismiss so
+  // typing carries on where it left off.
+  useEffect(() => {
+    if (exitPromptOpen || !activeSessionId) return;
+    termRef.current?.focus();
+  }, [activeSessionId, exitPromptOpen]);
 
   const writeToTerm = useCallback((data: string) => {
     const term = termRef.current;

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach, afterEach, type Mock } from "vitest";
 import App, { formatTimestamp } from "./App";
@@ -9,6 +9,7 @@ const originalWebSocket = globalThis.WebSocket;
 
 class MockWebSocket {
   static OPEN = 1;
+  static instances: MockWebSocket[] = [];
   readyState = MockWebSocket.OPEN;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onclose: ((event: CloseEvent) => void) | null = null;
@@ -16,6 +17,7 @@ class MockWebSocket {
 
   constructor(url: string) {
     this.url = url;
+    MockWebSocket.instances.push(this);
   }
 
   send() {}
@@ -25,7 +27,13 @@ class MockWebSocket {
       this.onclose(new CloseEvent("close"));
     }
   }
+
+  emit(payload: unknown) {
+    this.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent);
+  }
 }
+
+const PENDING = { id: "p1", userCode: "WXYZ-ABCD", hostname: "build-box", createdAt: 0, expiresAt: Date.now() + 1000 };
 
 describe("App helpers", () => {
   it("formats timestamps in local time", () => {
@@ -36,6 +44,7 @@ describe("App helpers", () => {
 
 describe("App component", () => {
   beforeEach(() => {
+    MockWebSocket.instances = [];
     globalThis.fetch = vi.fn(() =>
       Promise.resolve({
         ok: true,
@@ -110,13 +119,7 @@ describe("App component", () => {
     const fetchMock = globalThis.fetch as unknown as Mock;
     fetchMock.mockImplementation((url: string) => {
       if (url === `${window.location.origin}/devices/pending`) {
-        return Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve([
-              { id: "p1", userCode: "WXYZ-ABCD", hostname: "build-box", createdAt: 0, expiresAt: Date.now() + 1000 },
-            ]),
-        }) as unknown as Promise<Response>;
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([PENDING]) }) as unknown as Promise<Response>;
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve([]) }) as unknown as Promise<Response>;
     });
@@ -131,5 +134,73 @@ describe("App component", () => {
 
     expect(await screen.findByText(/1 machine waiting for approval/i)).toBeInTheDocument();
     expect(screen.getByText(/WXYZ-ABCD/)).toBeInTheDocument();
+    // In the machine list itself, waiting for a decision rather than shown as a
+    // dead connection.
+    expect(await screen.findByText("Pending approval")).toBeInTheDocument();
+    expect(screen.getByLabelText("Agent is pending approval")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Agent is disconnected")).not.toBeInTheDocument();
+  });
+
+  it("lists a machine pushed over the socket without a reload", async () => {
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <App />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThan(0));
+    expect(screen.queryByText("Pending approval")).not.toBeInTheDocument();
+
+    act(() => MockWebSocket.instances[0].emit({ type: "pending", pending: [PENDING] }));
+
+    expect(await screen.findByText("Pending approval")).toBeInTheDocument();
+    expect(screen.getByText("build-box")).toBeInTheDocument();
+  });
+
+  it("approves and rejects from the machine list", async () => {
+    const fetchMock = globalThis.fetch as unknown as Mock;
+    fetchMock.mockImplementation((url: string) => {
+      if (url === `${window.location.origin}/devices/pending`) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([PENDING]) }) as unknown as Promise<Response>;
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) }) as unknown as Promise<Response>;
+    });
+
+    const { unmount } = render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <App />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /approve/i }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) => url === `${window.location.origin}/devices/pending/WXYZ-ABCD/approve`,
+        ),
+      ).toBe(true),
+    );
+    await waitFor(() => expect(screen.queryByText("Pending approval")).not.toBeInTheDocument());
+
+    unmount();
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <App />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /reject/i }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url]) => url === `${window.location.origin}/devices/pending/WXYZ-ABCD/deny`),
+      ).toBe(true),
+    );
+    await waitFor(() => expect(screen.queryByText("Pending approval")).not.toBeInTheDocument());
   });
 });

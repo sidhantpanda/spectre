@@ -113,12 +113,14 @@ func enrollWithAuthKey(host, authKey, deviceID string) (string, error) {
 	}
 	defer conn.Close()
 
-	hostname, _ := os.Hostname()
+	// The full fingerprint, not just the hostname: the server derives this
+	// machine's stable identity from the machine-id and MACs, and a device row
+	// enrolled without them can never be recognised as the same machine again.
 	hello := AgentMessage{
 		Type:         "hello",
 		AgentID:      deviceID,
 		AgentVersion: getAgentVersion(),
-		Fingerprint:  map[string]any{"hostname": hostname},
+		Fingerprint:  collectFingerprint(),
 	}
 	if err := conn.WriteJSON(hello); err != nil {
 		return "", err

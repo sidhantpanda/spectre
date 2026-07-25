@@ -8,6 +8,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -17,6 +18,11 @@ const (
 	launchdLabel     = "com.spectre.agent"
 )
 
+// State directory for the installed service. Both the unit file and the
+// enrollment that runs before it resolve their paths from here. A var so tests
+// can point it somewhere writable.
+var defaultServiceAgentHome = "/var/lib/spectre-agent"
+
 func serviceUp(host, authKey string) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -24,10 +30,24 @@ func serviceUp(host, authKey string) error {
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
 
+	// The service runs with SPECTRE_AGENT_HOME pointed at its own state
+	// directory, so enrollment has to write there too. Enrolling into the
+	// invoking user's home instead leaves the service with no device key: it
+	// enrols the machine a second time, and one host ends up as two entries on
+	// the dashboard.
+	if err := prepareServiceHome(); err != nil {
+		return err
+	}
+
 	// Enrollment happens once, here, before the service is installed. The
 	// device key is written to the device info file, so the auth key never
 	// needs to appear in the unit file or in `ps` output.
 	if err := enrollForService(host, authKey); err != nil {
+		return err
+	}
+
+	// The file was just written by root; the service runs as the invoking user.
+	if err := handServiceHomeToServiceAccount(); err != nil {
 		return err
 	}
 
@@ -107,6 +127,105 @@ func purgeDataDirs() {
 	}
 }
 
+// serviceAgentHome is where the installed service keeps its device key. An
+// operator-set SPECTRE_AGENT_HOME wins, and is written into the unit so both
+// halves keep agreeing.
+func serviceAgentHome() string {
+	if home := os.Getenv("SPECTRE_AGENT_HOME"); home != "" {
+		return home
+	}
+	return defaultServiceAgentHome
+}
+
+// prepareServiceHome points enrollment at the service's state directory, and
+// carries over a device key from a previous non-service enrollment so an
+// already-enrolled machine is not enrolled all over again.
+func prepareServiceHome() error {
+	home := serviceAgentHome()
+	if os.Getenv("SPECTRE_AGENT_HOME") == home {
+		return nil // already resolved to the same place; nothing to move
+	}
+
+	existing, err := deviceInfoPath()
+	if err != nil {
+		existing = "" // no home to migrate from; not fatal
+	}
+
+	if err := os.Setenv("SPECTRE_AGENT_HOME", home); err != nil {
+		return fmt.Errorf("set agent home: %w", err)
+	}
+	target, err := deviceInfoPath()
+	if err != nil {
+		return fmt.Errorf("resolve device info path: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", filepath.Dir(target), err)
+	}
+
+	if existing == "" || existing == target {
+		return nil
+	}
+	if _, err := os.Stat(target); err == nil {
+		return nil // the service already has its own copy
+	}
+	data, err := os.ReadFile(existing)
+	if err != nil {
+		return nil // nothing enrolled here before
+	}
+	// Copied, not moved: running `spectre-agent run` by hand as that user keeps
+	// working, and it is the same device key either way.
+	if err := os.WriteFile(target, data, 0o600); err != nil {
+		return fmt.Errorf("copy device info to %s: %w", target, err)
+	}
+	fmt.Printf("Reusing the device key already enrolled on this machine (%s).\n", existing)
+	return nil
+}
+
+// handServiceHomeToServiceAccount gives the state directory to whoever the
+// service runs as. `up` runs under sudo, so everything it just wrote is owned
+// by root and would be unreadable to a service running as the invoking user.
+func handServiceHomeToServiceAccount() error {
+	uid, gid, ok := serviceAccountIDs()
+	if !ok {
+		return nil // service runs as root; nothing to hand over
+	}
+
+	path, err := deviceInfoPath()
+	if err != nil {
+		return nil
+	}
+	dir := filepath.Dir(path)
+	for _, target := range []string{filepath.Dir(dir), dir, path} {
+		if _, err := os.Stat(target); err != nil {
+			continue
+		}
+		if err := os.Chown(target, uid, gid); err != nil {
+			return fmt.Errorf("chown %s: %w", target, err)
+		}
+	}
+	return nil
+}
+
+func serviceAccountIDs() (int, int, bool) {
+	name, _ := resolveServiceAccount()
+	if name == "" {
+		return 0, 0, false
+	}
+	u, err := user.Lookup(name)
+	if err != nil {
+		return 0, 0, false
+	}
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return 0, 0, false
+	}
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		return 0, 0, false
+	}
+	return uid, gid, true
+}
+
 // enrollForService makes sure this machine holds a device key before the
 // service is installed, so the service itself starts with no secret on its
 // command line. An already-enrolled machine is left alone.
@@ -147,6 +266,23 @@ func buildExecArgs(host string) []string {
 }
 
 func installSystemdService(exe string, args []string) error {
+	if err := os.WriteFile(systemdUnitPath, []byte(systemdUnit(exe, args)), 0644); err != nil {
+		return fmt.Errorf("write unit: %w", err)
+	}
+
+	if err := runCommand("systemctl", "daemon-reload"); err != nil {
+		return err
+	}
+	if err := runCommand("systemctl", "enable", "--now", "spectre-agent.service"); err != nil {
+		return err
+	}
+
+	// Show status for quick troubleshooting when invoked interactively.
+	_ = runCommand("systemctl", "status", "--no-pager", "spectre-agent.service")
+	return nil
+}
+
+func systemdUnit(exe string, args []string) string {
 	userName, groupName := resolveServiceAccount()
 	var sb strings.Builder
 	sb.WriteString("[Unit]\n")
@@ -156,7 +292,7 @@ func installSystemdService(exe string, args []string) error {
 	sb.WriteString("[Service]\n")
 	sb.WriteString("Type=simple\n")
 	sb.WriteString("Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/bin\n")
-	sb.WriteString("Environment=SPECTRE_AGENT_HOME=/var/lib/spectre-agent\n")
+	sb.WriteString("Environment=SPECTRE_AGENT_HOME=" + serviceAgentHome() + "\n")
 	sb.WriteString("StateDirectory=spectre-agent\n")
 	if userName != "" {
 		sb.WriteString("User=" + userName + "\n")
@@ -172,22 +308,7 @@ func installSystemdService(exe string, args []string) error {
 	sb.WriteString("[Install]\n")
 	sb.WriteString("WantedBy=multi-user.target\n")
 
-	content := sb.String()
-
-	if err := os.WriteFile(systemdUnitPath, []byte(content), 0644); err != nil {
-		return fmt.Errorf("write unit: %w", err)
-	}
-
-	if err := runCommand("systemctl", "daemon-reload"); err != nil {
-		return err
-	}
-	if err := runCommand("systemctl", "enable", "--now", "spectre-agent.service"); err != nil {
-		return err
-	}
-
-	// Show status for quick troubleshooting when invoked interactively.
-	_ = runCommand("systemctl", "status", "--no-pager", "spectre-agent.service")
-	return nil
+	return sb.String()
 }
 
 func uninstallSystemdService() error {
@@ -218,12 +339,16 @@ func installLaunchdService(exe string, args []string) error {
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SPECTRE_AGENT_HOME</key><string>%s</string>
+  </dict>
   <key>StandardOutPath</key><string>/var/log/spectre-agent.log</string>
   <key>StandardErrorPath</key><string>/var/log/spectre-agent.log</string>
 %s
 </dict>
 </plist>
-`, launchdLabel, exe, launchdArgs(args), userLine)
+`, launchdLabel, exe, launchdArgs(args), serviceAgentHome(), userLine)
 
 	if err := os.WriteFile(launchdPlistPath, []byte(plist), 0644); err != nil {
 		return fmt.Errorf("write plist: %w", err)
