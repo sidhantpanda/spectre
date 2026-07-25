@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import "@xterm/xterm/css/xterm.css";
-import { buildWsUrl } from "../lib/api";
-import { SessionPicker, type SessionInfo } from "./SessionPicker";
+import { type Terminal } from "@xterm/xterm";
+import { CTRL_D } from "./terminal/types";
+import { useTerminalSocket } from "../hooks/useTerminalSocket";
+import { useXterm } from "../hooks/useXterm";
+import { SessionPicker } from "./SessionPicker";
 import { SessionExitDialog } from "./SessionExitDialog";
 import { Button } from "./ui/button";
 
@@ -20,18 +20,6 @@ type Props = {
   onLeaveHost?: () => void;
 };
 
-type TerminalMessage =
-  | { type: "output"; data: string; sessionId?: string }
-  | { type: "status"; status: string; connectionId?: string }
-  | { type: "sessions"; sessions?: SessionInfo[]; tmuxAvailable?: boolean }
-  | { type: "attached"; sessionId: string }
-  | { type: "sessionExited"; sessionId: string }
-  | { type: "sessionClosed"; sessionId: string }
-  | { type: "error"; message: string };
-
-/** End-of-transmission — what Ctrl+D sends. */
-const CTRL_D = "\x04";
-
 export function AgentTerminal({
   agentId,
   apiBase,
@@ -41,291 +29,66 @@ export function AgentTerminal({
   onSessionChange,
   onLeaveHost,
 }: Props) {
-  const socketRef = useRef<WebSocket | null>(null);
+  const [exitPromptOpen, setExitPromptOpen] = useState(false);
+
+  // termRef and pendingOutput are shared by both hooks below: useTerminalSocket
+  // writes into the terminal (or buffers, if it is not mounted yet) and reports
+  // the live geometry, while useXterm owns the actual xterm.js instance. They
+  // are declared here, not inside either hook, because useTerminalSocket is
+  // wired up before useXterm runs and needs them from the start.
   const termRef = useRef<Terminal | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
-  const reconnectTimer = useRef<number | null>(null);
+  const pendingOutput = useRef<string[]>([]);
+
   // Output can arrive between attaching and the terminal being mounted; hold it
   // rather than dropping the first lines of the session.
-  const pendingOutput = useRef<string[]>([]);
-  const activeSessionRef = useRef<string | null>(null);
-  // The route drives which session is attached; kept in a ref so the socket
-  // handlers can read it without being torn down on every navigation.
-  const routeSessionRef = useRef<string | null>(routeSessionId);
-  routeSessionRef.current = routeSessionId;
-  const onSessionChangeRef = useRef(onSessionChange);
-  onSessionChangeRef.current = onSessionChange;
-  // The last route value acted on. A navigation lands a render later than the
-  // state change that triggered it, so without this the terminal would see its
-  // own not-yet-applied navigation as the user asking for something else.
-  const handledRouteRef = useRef<string | null | undefined>(undefined);
-
-  const [termNode, setTermNode] = useState<HTMLDivElement | null>(null);
-  const [status, setStatus] = useState<"disconnected" | "connecting" | "connected" | "error">("disconnected");
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [sessionsLoaded, setSessionsLoaded] = useState(false);
-  const [tmuxAvailable, setTmuxAvailable] = useState(true);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [exitPromptOpen, setExitPromptOpen] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-
-  const send = useCallback((payload: Record<string, unknown>) => {
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify(payload));
-    }
-  }, []);
-
-  const setActive = useCallback((sessionId: string | null) => {
-    activeSessionRef.current = sessionId;
-    setActiveSessionId(sessionId);
-    if (routeSessionRef.current !== sessionId) onSessionChangeRef.current?.(sessionId);
-  }, []);
-
-  // Create the terminal only while a session is attached, so the picker is not
-  // sitting behind a stale, zero-sized xterm instance.
-  useEffect(() => {
-    if (!activeSessionId || !termNode) return;
-
-    const term = new Terminal({
-      convertEol: true,
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: 'ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-      theme: {
-        background: "#0B1021",
-        foreground: "#E2E8F0",
-        black: "#1e293b",
-        green: "#22c55e",
-        cyan: "#06b6d4",
-        blue: "#3b82f6",
-        magenta: "#a855f7",
-        red: "#ef4444",
-        yellow: "#eab308",
-      },
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(termNode);
-    termRef.current = term;
-    fitRef.current = fit;
-
-    const safeFit = () => {
-      if (!fitRef.current || !termRef.current?.element) return;
-      try {
-        fitRef.current.fit();
-      } catch {
-        // ignore transient sizing errors
-      }
-    };
-
-    // Fitting only resizes the canvas in the browser. The remote PTY has to be
-    // told separately, or the shell keeps wrapping lines and drawing
-    // full-screen programs for its original geometry.
-    const resizeHandler = term.onResize(({ cols, rows }) => {
-      send({ type: "resize", cols, rows });
-    });
-
-    safeFit();
-    // onResize only fires when the fitted size differs from xterm's default, so
-    // send the current geometry unconditionally — the session may have been
-    // left at a different size by a previous viewer.
-    send({ type: "resize", cols: term.cols, rows: term.rows });
-
-    for (const chunk of pendingOutput.current) term.write(chunk);
-    pendingOutput.current = [];
-
-    // Ctrl+D is swallowed here, before it can reach the agent. The shell never
-    // sees it, so nothing has exited yet and the dialog can still offer to keep
-    // the session running.
-    const dataHandler = term.onData((data) => {
-      if (data === CTRL_D) {
-        setExitPromptOpen(true);
-        return;
-      }
-      send({ type: "input", data });
-    });
-
-    // Opening a session is a request to type in it: put the caret in the
-    // terminal so the first keystroke lands there and the cursor is visible,
-    // rather than making the user click the black rectangle first.
-    term.focus();
-
-    // A ResizeObserver catches everything a window listener misses: the sidebar
-    // opening, the notice banner appearing, a phone rotating, the container's
-    // own vh-based height changing.
-    const observer = new ResizeObserver(() => safeFit());
-    observer.observe(termNode);
-    window.addEventListener("resize", safeFit);
-
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", safeFit);
-      resizeHandler.dispose();
-      dataHandler.dispose();
-      fitRef.current?.dispose();
-      fitRef.current = null;
-      termRef.current?.dispose();
-      termRef.current = null;
-    };
-  }, [activeSessionId, termNode, send]);
-
-  // The exit dialog takes focus while it is open; hand it back on dismiss so
-  // typing carries on where it left off.
-  useEffect(() => {
-    if (exitPromptOpen || !activeSessionId) return;
-    termRef.current?.focus();
-  }, [activeSessionId, exitPromptOpen]);
-
   const writeToTerm = useCallback((data: string) => {
     const term = termRef.current;
     if (term?.element) term.write(data);
     else pendingOutput.current.push(data);
   }, []);
 
-  // Socket lifecycle, independent of which session is attached: the picker and
-  // the terminal share one connection.
-  useEffect(() => {
-    let cancelled = false;
-    let backoff = 1000;
+  const clearPendingOutput = useCallback(() => {
+    pendingOutput.current = [];
+  }, []);
 
-    const cleanupSocket = () => {
-      if (socketRef.current) {
-        socketRef.current.onclose = null;
-        socketRef.current.onerror = null;
-        socketRef.current.onmessage = null;
-        socketRef.current.onopen = null;
-        socketRef.current.close();
-        socketRef.current = null;
-      }
-    };
+  const getTermSize = useCallback(() => {
+    const term = termRef.current;
+    return term ? { cols: term.cols, rows: term.rows } : undefined;
+  }, []);
 
-    if (!enabled) {
-      setStatus("disconnected");
-      cleanupSocket();
-      return () => {};
-    }
+  const {
+    status,
+    sessions,
+    sessionsLoaded,
+    tmuxAvailable,
+    activeSessionId,
+    notice,
+    setNotice,
+    send,
+    setActive,
+    activeSessionRef,
+    handledRouteRef,
+    onSessionChangeRef,
+  } = useTerminalSocket({
+    agentId,
+    apiBase,
+    connectionId,
+    enabled,
+    routeSessionId,
+    onSessionChange,
+    writeToTerm,
+    clearPendingOutput,
+    getTermSize,
+  });
 
-    const connect = async () => {
-      if (cancelled) return;
-      setStatus("connecting");
-
-      // Each attempt mints a fresh single-use ticket; a reconnect cannot reuse
-      // the previous one.
-      let url: string;
-      try {
-        url = await buildWsUrl(`/terminal?id=${encodeURIComponent(agentId)}`, apiBase);
-      } catch {
-        setStatus("error");
-        setNotice("Could not authenticate terminal session.");
-        return;
-      }
-      if (cancelled) return;
-
-      const socket = new WebSocket(url);
-      socketRef.current = socket;
-
-      socket.onopen = () => {
-        backoff = 1000;
-        setStatus("connected");
-        setNotice(null);
-        // Re-attach after a dropped link so the session survives the round trip.
-        // The terminal already exists here, so its geometry rides along and the
-        // re-opened PTY starts at the right size.
-        if (activeSessionRef.current) {
-          const term = termRef.current;
-          send({
-            type: "attach",
-            sessionId: activeSessionRef.current,
-            ...(term ? { cols: term.cols, rows: term.rows } : {}),
-          });
-        } else {
-          // An attach the dropped socket never answered is still owed to the
-          // route; let the sync effect issue it again.
-          handledRouteRef.current = undefined;
-        }
-      };
-
-      socket.onmessage = (evt) => {
-        let payload: TerminalMessage;
-        try {
-          payload = JSON.parse(evt.data) as TerminalMessage;
-        } catch {
-          return;
-        }
-
-        switch (payload.type) {
-          case "output":
-            writeToTerm(payload.data);
-            return;
-          case "sessions": {
-            const list = payload.sessions ?? [];
-            setSessions(list);
-            setSessionsLoaded(true);
-            setTmuxAvailable(payload.tmuxAvailable ?? false);
-            // Nothing running on the host: open one straight away rather than
-            // showing an empty picker. A route that names a session is left to
-            // the sync effect below, which reports a dead link instead.
-            if (!activeSessionRef.current && !routeSessionRef.current && list.length === 0) {
-              send({ type: "create" });
-            }
-            return;
-          }
-          case "attached":
-            pendingOutput.current = [];
-            setActive(payload.sessionId);
-            setNotice(null);
-            return;
-          case "sessionExited":
-            // The shell ended on its own (an `exit`, or the process died).
-            if (activeSessionRef.current === payload.sessionId) {
-              setActive(null);
-              setNotice("The shell in that session exited.");
-            }
-            send({ type: "listSessions" });
-            return;
-          case "sessionClosed":
-            if (activeSessionRef.current === payload.sessionId) setActive(null);
-            return;
-          case "status":
-            if (payload.status === "connected") setStatus("connected");
-            else if (payload.status === "connecting") setStatus("connecting");
-            else {
-              setStatus("disconnected");
-              setNotice("The agent disconnected.");
-            }
-            return;
-          case "error":
-            setNotice(payload.message);
-            return;
-        }
-      };
-
-      const scheduleReconnect = () => {
-        if (cancelled) return;
-        if (socketRef.current === socket) socketRef.current = null;
-        setStatus("disconnected");
-        backoff = Math.min(backoff * 2, 5000);
-        reconnectTimer.current = window.setTimeout(() => void connect(), backoff);
-      };
-
-      socket.onclose = scheduleReconnect;
-      socket.onerror = () => {
-        setStatus("error");
-        scheduleReconnect();
-      };
-    };
-
-    void connect();
-
-    return () => {
-      cancelled = true;
-      if (reconnectTimer.current) {
-        clearTimeout(reconnectTimer.current);
-        reconnectTimer.current = null;
-      }
-      cleanupSocket();
-    };
-  }, [agentId, apiBase, connectionId, enabled, send, setActive, writeToTerm]);
+  const { termNode, setTermNode } = useXterm({
+    activeSessionId,
+    termRef,
+    pendingOutput,
+    exitPromptOpen,
+    send,
+    onCtrlD: () => setExitPromptOpen(true),
+  });
 
   // Picking a session only moves the route; the effect below does the attaching
   // so every entry point (click, link, reload) takes the same path.
@@ -334,7 +97,7 @@ export function AgentTerminal({
       if (onSessionChangeRef.current) onSessionChangeRef.current(sessionId);
       else send({ type: "attach", sessionId });
     },
-    [send],
+    [send, onSessionChangeRef],
   );
 
   // Follow the route: a link, a reload, or the Back button all end up here, and
@@ -388,7 +151,7 @@ export function AgentTerminal({
       send({ type: "kill", sessionId });
       if (activeSessionRef.current === sessionId) leaveHost();
     },
-    [leaveHost, send],
+    [leaveHost, send, activeSessionRef],
   );
 
   return (
