@@ -37,7 +37,6 @@ function App() {
             <h1 className="text-2xl font-semibold tracking-tight">Spectre Control Panel</h1>
           </div>
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="rounded-full">Live inbound + outbound</Badge>
             <ThemeToggle />
           </div>
         </div>
