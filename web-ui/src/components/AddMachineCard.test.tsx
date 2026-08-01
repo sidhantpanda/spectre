@@ -36,8 +36,19 @@ describe("AddMachineCard", () => {
     );
 
     // The plaintext key is returned once, so the UI must surface it in a
-    // command the operator can run as-is.
-    const command = await screen.findByText(/spectre-agent up --host .* --authkey sk_testkey123/);
+    // command the operator can run as-is. The machine being added has no agent
+    // on it yet, so the command installs one before enrolling.
+    const command = await screen.findByText(
+      /curl -fsSL \S+install-agent\.sh \| sudo SPECTRE_AUTHKEY=sk_testkey123 bash -s -- --host \S+/,
+    );
     expect(command).toBeInTheDocument();
+
+    // The key rides in the environment; as a flag it would sit in `ps`.
+    expect(command.textContent).not.toMatch(/--authkey/);
+
+    // A machine that already has the agent gets the shorter form.
+    expect(
+      await screen.findByText(/sudo SPECTRE_AUTHKEY=sk_testkey123 spectre-agent up --host \S+/),
+    ).toBeInTheDocument();
   });
 });

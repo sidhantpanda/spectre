@@ -188,7 +188,14 @@ jobs:
 
           ### Agent
 
-          Install the latest agent on a remote machine:
+          Install the agent on a remote machine and connect it in one line:
+
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install-agent.sh \\
+            | sudo SPECTRE_AUTHKEY=sk_... bash -s -- --host wss://spectre.example.com
+          \`\`\`
+
+          Or install the binary only:
 
           \`\`\`bash
           curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install-agent.sh | sudo bash

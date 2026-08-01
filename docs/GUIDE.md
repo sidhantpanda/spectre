@@ -117,11 +117,29 @@ A single self-contained Go binary. Put it on the machine, then enrol it.
 
 ### Install the binary
 
-**Option A — install script (downloads the latest release):**
+**Option A — install script (downloads the latest release).** It detects the machine's OS and architecture, picks the matching release asset, and installs to `/usr/local/bin`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh | sudo bash
 ```
+
+Given a `--host` it enrols the machine too, so install and connect are one line:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh \
+  | sudo SPECTRE_AUTHKEY=sk_... bash -s -- --host wss://spectre.example.com
+```
+
+| Flag | Environment | Default | Purpose |
+|------|-------------|---------|---------|
+| `--host <url>` | `SPECTRE_HOST` | — | Control server to enrol with. Omit to install the binary only. |
+| `--authkey <key>` | `SPECTRE_AUTHKEY` | — | Auth key from the UI. Omit and the agent prints a code to approve. |
+| `--tag <vX.Y.Z>` | `TAG` | latest release | Which release to install. |
+| `--bin-dir <dir>` | `BIN_DIR` | `/usr/local/bin` | Where to put the binary. |
+
+Prefer `SPECTRE_AUTHKEY` over `--authkey`: a flag is visible in `ps` to every user on the machine for as long as the command runs. The script passes the key to the agent through the environment either way, so the agent's own process never exposes it.
+
+Supported assets are `linux/amd64`, `linux/arm64`, `darwin/amd64`, and `darwin/arm64`. A 32-bit Pi (`armv7l`) has no published build — use Option B.
 
 **Option B — build it here and copy it to a machine on your network.** This is the usual path for a home lab or LAN box: cross-compile on your dev machine, `scp` the binary over, and enrol it against your local server. No published release needed.
 

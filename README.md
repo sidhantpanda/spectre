@@ -37,15 +37,22 @@ Open `http://<server-ip>:3000` and log in.
 
 ### 2. Add a machine
 
-Install the agent on the machine you want a shell on:
+**One line** — for scripts, cloud-init, and images. Create an auth key in the UI ("Add a machine" → *Create auth key*), which hands you a command to paste on the target machine:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh \
+  | sudo SPECTRE_AUTHKEY=sk_... bash -s -- --host wss://spectre.example.com
+```
+
+That downloads the agent build matching the machine's OS and architecture, installs it, enrolls it, and starts it as a service. The key goes through the environment so it never appears in `ps`.
+
+**Interactive** — no secrets to copy around. Install the agent first:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh | sudo bash
 ```
 
-Then connect it. Pick whichever fits:
-
-**Interactive** — no secrets to copy around. Run this on the machine:
+Then connect it:
 
 ```bash
 sudo spectre-agent up --host wss://spectre.example.com
@@ -63,10 +70,11 @@ To add this machine, open Spectre and approve it:
 Waiting for approval...
 ```
 
-**Non-interactive** — for scripts, cloud-init, and images. Create an auth key in the UI ("Add a machine" → *Create auth key*), then:
+You can also skip the auth key and let the installer do the same thing — pass `--host` with no key and it prints the code for you:
 
 ```bash
-sudo spectre-agent up --host wss://spectre.example.com --authkey sk_...
+curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh \
+  | sudo bash -s -- --host wss://spectre.example.com
 ```
 
 Either way the machine enrolls, stores a device key, installs itself as a service, and reconnects on boot. Click it in the UI to open a terminal.

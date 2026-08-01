@@ -3,7 +3,13 @@ import { Check, Copy } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { createAuthKey, enrollCommand, fetchConnectHost, type CreatedAuthKey } from "../state/enrollment";
+import {
+  createAuthKey,
+  enrollCommand,
+  enrollExistingCommand,
+  fetchConnectHost,
+  type CreatedAuthKey,
+} from "../state/enrollment";
 
 type Props = {
   apiBase: string;
@@ -35,9 +41,11 @@ export function AddMachineCard({ apiBase }: Props) {
     }
   }
 
-  const command = useMemo(
-    () => (createdKey ? enrollCommand(createdKey.key, connectHost ?? apiBase.replace(/^http/, "ws")) : ""),
-    [createdKey, connectHost, apiBase],
+  const host = connectHost ?? apiBase.replace(/^http/, "ws");
+  const command = useMemo(() => (createdKey ? enrollCommand(createdKey.key, host) : ""), [createdKey, host]);
+  const existingCommand = useMemo(
+    () => (createdKey ? enrollExistingCommand(createdKey.key, host) : ""),
+    [createdKey, host],
   );
 
   function copyCommand() {
@@ -59,7 +67,9 @@ export function AddMachineCard({ apiBase }: Props) {
       <CardContent>
         {createdKey ? (
           <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">Run this on the machine you want to add:</p>
+            <p className="text-sm text-muted-foreground">
+              Run this on the machine you want to add. It installs the agent and connects it.
+            </p>
             <div className="flex items-center gap-2">
               <code className="block flex-1 overflow-x-auto whitespace-nowrap rounded-md bg-muted px-3 py-2 font-mono text-sm">
                 {command}
@@ -68,6 +78,10 @@ export function AddMachineCard({ apiBase }: Props) {
                 {copied ? <Check size={14} /> : <Copy size={14} />}
               </Button>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Already installed there? Run{" "}
+              <code className="font-mono break-all">{existingCommand}</code> instead.
+            </p>
             <p className="text-xs text-muted-foreground">
               Single use, expires {new Date(createdKey.expiresAt).toLocaleDateString()}. This key is shown once —
               copy it now.
