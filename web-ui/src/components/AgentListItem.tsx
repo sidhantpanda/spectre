@@ -22,7 +22,6 @@ type Props = {
  */
 function summarize(agent: Agent) {
   const parts: string[] = [];
-  if (agent.address) parts.push(agent.address);
   if (agent.systemInfo) {
     parts.push(agent.systemInfo.os);
     parts.push(`${agent.systemInfo.cores} cores (${agent.systemInfo.arch})`);
@@ -115,8 +114,6 @@ export function AgentListItem({ agent, removing, onOpen, onRemove }: Props) {
 
       {expanded && (
         <div id={detailsId} className="space-y-3 border-t pt-3">
-          <p className="break-all text-sm text-muted-foreground">{displayDeviceId(agent)}</p>
-
           <div className="flex flex-col gap-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">System Info</p>
             <div className="flex flex-wrap items-center gap-2 text-xs">

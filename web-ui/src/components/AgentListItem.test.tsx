@@ -9,7 +9,7 @@ describe("AgentListItem", () => {
     const agent = {
       id: "dev-1",
       connectionId: "c1",
-      address: "192.168.1.27",
+      address: "::ffff:192.168.1.27:60258",
       status: "connected",
       lastSeen: Date.now(),
       identity: "mid:abc123",
@@ -40,10 +40,12 @@ describe("AgentListItem", () => {
 
     // Collapsed: the host and a one-line summary, none of the inventory.
     expect(await screen.findByText("ams-1-rpi3-1")).toBeInTheDocument();
-    expect(screen.getByText(/192\.168\.1\.27 · Debian GNU\/Linux 13 · 4 cores \(arm64\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Debian GNU\/Linux 13 · 4 cores \(arm64\)/)).toBeInTheDocument();
+    // The inbound socket address carries an ephemeral port that changes on every
+    // reconnect, so it stays out of the summary.
+    expect(screen.queryByText(/60258/)).not.toBeInTheDocument();
     expect(screen.queryByText("Docker Containers")).not.toBeInTheDocument();
     expect(screen.queryByText("adguardhome")).not.toBeInTheDocument();
-    expect(screen.queryByText("mid:abc123")).not.toBeInTheDocument();
 
     const toggle = screen.getByRole("button", { name: "Show more" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -51,7 +53,8 @@ describe("AgentListItem", () => {
 
     expect(screen.getByText("Docker Containers")).toBeInTheDocument();
     expect(screen.getByText("adguardhome")).toBeInTheDocument();
-    expect(screen.getByText("mid:abc123")).toBeInTheDocument();
+    // The hardware identity is internal plumbing; the hostname names the machine.
+    expect(screen.queryByText("mid:abc123")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
 
     fireEvent.click(screen.getByRole("button", { name: "Show less" }));
