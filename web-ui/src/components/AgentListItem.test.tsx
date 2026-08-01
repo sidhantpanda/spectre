@@ -26,7 +26,21 @@ describe("AgentListItem", () => {
         diskFreeBytes: 23000000000,
       },
       networkInfo: { ipv4: ["192.168.1.27"], ipv6: [] },
-      docker: [{ name: "adguardhome", ports: ["0.0.0.0:53->53/tcp"] }],
+      docker: [
+        {
+          name: "adguardhome",
+          ports: [
+            "0.0.0.0:53->53/tcp",
+            "[::]:53->53/tcp",
+            "0.0.0.0:53->53/udp",
+            "[::]:53->53/udp",
+            "0.0.0.0:3000->3000/tcp",
+            "[::]:3000->3000/tcp",
+            "67-68/udp",
+            "6060/tcp",
+          ],
+        },
+      ],
     };
     const fetchMock = globalThis.fetch as unknown as Mock;
     fetchMock.mockImplementation((url: string) => {
@@ -53,6 +67,8 @@ describe("AgentListItem", () => {
 
     expect(screen.getByText("Docker Containers")).toBeInTheDocument();
     expect(screen.getByText("adguardhome")).toBeInTheDocument();
+    // Eight raw bindings, two ports anyone would dial.
+    expect(screen.getByText("53 · 3000")).toBeInTheDocument();
     // The hardware identity is internal plumbing; the hostname names the machine.
     expect(screen.queryByText("mid:abc123")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");

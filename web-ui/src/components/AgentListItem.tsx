@@ -3,8 +3,8 @@ import { ChevronDown, Cpu, Gauge, HardDrive, MemoryStick, Monitor, Network, Tras
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { AgentStatusDot } from "./AgentStatusDot";
-import { displayDeviceId, type Agent } from "../state/agents";
-import { formatBytes, formatDisk, formatList, formatTimestamp } from "../lib/format";
+import { displayDeviceId, type Agent, type DockerContainer } from "../state/agents";
+import { formatBytes, formatDisk, formatList, formatTimestamp, publishedPorts } from "../lib/format";
 
 type Props = {
   agent: Agent;
@@ -31,6 +31,30 @@ function summarize(agent: Agent) {
     parts.push(`${agent.docker.length} container${agent.docker.length === 1 ? "" : "s"}`);
   }
   return parts.join(" · ");
+}
+
+/**
+ * One container, named and labelled with the ports you can reach it on.
+ *
+ * The raw `docker ps` bindings stay on the title so the protocol and bind
+ * address are one hover away when someone actually needs them.
+ */
+function ContainerBadge({ container }: { container: DockerContainer }) {
+  const ports = publishedPorts(container.ports);
+  const exposedOnly = ports.length === 0 && (container.ports ?? []).length > 0;
+
+  return (
+    <Badge
+      variant="outline"
+      className="text-xs font-normal"
+      title={(container.ports ?? []).join(", ") || undefined}
+    >
+      <span className="font-medium text-foreground">{container.name}</span>
+      <span className="ml-1 break-all text-muted-foreground">
+        {ports.length > 0 ? ports.join(" · ") : exposedOnly ? "no published ports" : "no ports"}
+      </span>
+    </Badge>
+  );
 }
 
 export function AgentListItem({ agent, removing, onOpen, onRemove }: Props) {
@@ -166,12 +190,7 @@ export function AgentListItem({ agent, removing, onOpen, onRemove }: Props) {
             <div className="flex flex-wrap items-center gap-2">
               {containers.length > 0 ? (
                 containers.map((container) => (
-                  <Badge key={container.name} variant="outline" className="text-xs font-normal">
-                    <span className="font-medium text-foreground">{container.name}</span>
-                    <span className="ml-1 break-all text-muted-foreground">
-                      {(container.ports ?? []).length > 0 ? container.ports.join(", ") : "no ports"}
-                    </span>
-                  </Badge>
+                  <ContainerBadge key={container.name} container={container} />
                 ))
               ) : agent.dockerError ? (
                 <span className="text-xs text-destructive">Docker: {agent.dockerError}</span>
