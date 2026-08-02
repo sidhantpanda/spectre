@@ -60,7 +60,7 @@ func connectToControlServer(host, authKey string, deviceInfo *DeviceInfo, finger
 }
 
 func runConnection(host, credential string, deviceInfo *DeviceInfo, fingerprint map[string]any, sessions *ptyManager) error {
-	wsURL, err := normalizeServerURL(host, "ws", "/agents/register")
+	wsURL, err := normalizeServerURL(host, "ws", "/api/agents/register")
 	if err != nil {
 		return fmt.Errorf("invalid control server host: %w", err)
 	}

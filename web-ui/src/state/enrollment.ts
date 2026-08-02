@@ -1,4 +1,4 @@
-import { getApiBase } from "../lib/api";
+import { getApiBase, getServerOrigin } from "../lib/api";
 import { authFetch } from "../lib/auth";
 
 const API_BASE = getApiBase();
@@ -118,7 +118,9 @@ export async function fetchConnectHost(): Promise<string> {
   } catch {
     // Fall through to the browser origin.
   }
-  return API_BASE.replace(/^http/, "ws");
+  // The origin, not API_BASE: this is the host an agent dials, and it appends
+  // its own /api/... path.
+  return getServerOrigin().replace(/^http/, "ws");
 }
 
 const INSTALL_SCRIPT_URL = "https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh";

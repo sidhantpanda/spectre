@@ -12,6 +12,17 @@ Install the agent on a machine, approve it once, and it shows up in the web UI. 
 Browser ◄──── WebSocket ────► Spectre server ◄──── WebSocket ────► Agent (+ tmux)
 ```
 
+Everything arrives on **one port**. A reverse proxy fronts the deployment and
+splits traffic by path — `/api/*` to the control server (REST and every
+WebSocket, the agent's included), everything else to the static web UI:
+
+```
+                        ┌──────────── proxy :3000 ───────────┐
+Browser  ──────────────►│  /api/*  ──►  server  (unpublished) │
+Agent    ──────────────►│  /*      ──►  web-ui  (unpublished) │
+                        └────────────────────────────────────┘
+```
+
 The agent **dials out** to your server and never opens a port, so it works behind NAT, CGNAT, and restrictive firewalls. There is nothing to expose on the machines you're connecting to.
 
 ---
@@ -27,9 +38,14 @@ Two steps: run a server, add a machine.
 export ADMIN_PASSWORD=$(openssl rand -base64 24)
 echo "Your password: $ADMIN_PASSWORD"
 
-curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/compose.yaml -o compose.yaml
+BASE=https://raw.githubusercontent.com/sidhantpanda/spectre/main
+curl -fsSL $BASE/compose.yaml -o compose.yaml
+curl -fsSL $BASE/default.conf.template -o default.conf.template
 docker compose up -d
 ```
+
+`default.conf.template` is the reverse proxy's nginx config. Compose mounts it
+into the stock `nginx` image — there is no Spectre proxy image to pull.
 
 Open `http://<server-ip>:3000` and log in.
 
@@ -183,7 +199,7 @@ ssh myhost 'sudo install -m 755 /tmp/spectre-agent /usr/local/bin/spectre-agent 
 Then enroll it against your dev server. **Use your dev machine's LAN IP, not `localhost`** — on the target, `localhost` is the target:
 
 ```bash
-ssh -t myhost 'sudo spectre-agent up --host ws://192.0.2.10:8080'
+ssh -t myhost 'sudo spectre-agent up --host ws://192.0.2.10:3000'
 ```
 
 Two things worth knowing: install **tmux** on the target if you want sessions to survive disconnects and agent restarts, and the `-ldflags` above is optional — without it the agent reports its version as `dev-<timestamp>`.

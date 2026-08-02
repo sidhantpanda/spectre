@@ -11,27 +11,42 @@ services:
     image: spectre-server:dev
     environment:
       - PORT=8080
+      # The server image sets NODE_ENV=production; SPECTRE_DEV_NO_AUTH is fatal
+      # under it, so this stack has to opt back out.
+      - NODE_ENV=development
       - SPECTRE_DEV_NO_AUTH=1
       - DATA_DIR=/data
       - TRUST_PROXY=1
     volumes:
       - server_data:/data
-    # Published so the agent can reach it directly at ws://localhost:8080.
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
 
   web-ui:
     build:
       context: .
       dockerfile: web-ui/Dockerfile
     image: spectre-web-ui:dev
-    depends_on:
-      - server
-    ports:
-      - "3000:80"
     environment:
       - SPECTRE_SERVER_HOST=
+    expose:
+      - "80"
+
+  proxy:
+    image: nginx:1.29.4-alpine
+    depends_on:
+      - server
+      - web-ui
+    # The only published port: UI, API and agents all arrive here, exactly as
+    # they do in production.
+    ports:
+      - "3000:80"
+    volumes:
+      - ./default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    environment:
       - SPECTRE_SERVER_UPSTREAM=server:8080
+      - SPECTRE_WEB_UI_UPSTREAM=web-ui:80
+      - NGINX_ENVSUBST_FILTER=^SPECTRE_
 
 volumes:
   server_data:

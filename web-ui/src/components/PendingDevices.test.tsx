@@ -8,7 +8,7 @@ describe("pending devices", () => {
   it("surfaces machines waiting for approval", async () => {
     const fetchMock = globalThis.fetch as unknown as Mock;
     fetchMock.mockImplementation((url: string) => {
-      if (url === `${window.location.origin}/devices/pending`) {
+      if (url === `${window.location.origin}/api/devices/pending`) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve([PENDING]) }) as unknown as Promise<Response>;
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve([]) }) as unknown as Promise<Response>;
@@ -40,7 +40,7 @@ describe("pending devices", () => {
   it("approves and rejects from the machine list", async () => {
     const fetchMock = globalThis.fetch as unknown as Mock;
     fetchMock.mockImplementation((url: string) => {
-      if (url === `${window.location.origin}/devices/pending`) {
+      if (url === `${window.location.origin}/api/devices/pending`) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve([PENDING]) }) as unknown as Promise<Response>;
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve([]) }) as unknown as Promise<Response>;
@@ -52,7 +52,7 @@ describe("pending devices", () => {
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(
-          ([url]) => url === `${window.location.origin}/devices/pending/WXYZ-ABCD/approve`,
+          ([url]) => url === `${window.location.origin}/api/devices/pending/WXYZ-ABCD/approve`,
         ),
       ).toBe(true),
     );
@@ -64,7 +64,7 @@ describe("pending devices", () => {
     fireEvent.click(await screen.findByRole("button", { name: /reject/i }));
     await waitFor(() =>
       expect(
-        fetchMock.mock.calls.some(([url]) => url === `${window.location.origin}/devices/pending/WXYZ-ABCD/deny`),
+        fetchMock.mock.calls.some(([url]) => url === `${window.location.origin}/api/devices/pending/WXYZ-ABCD/deny`),
       ).toBe(true),
     );
     await waitFor(() => expect(screen.queryByText("Pending approval")).not.toBeInTheDocument());

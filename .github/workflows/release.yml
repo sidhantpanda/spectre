@@ -2,6 +2,7 @@ name: Release
 
 # A single tag releases everything. Push v1.2.3 to:
 #   - build + push the server and web-ui Docker images to GHCR
+#     (the proxy is stock nginx configured by compose; nothing to build)
 #   - cross-compile the agent binaries
 #   - publish one GitHub release (agent binaries attached)
 #

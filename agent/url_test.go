@@ -3,12 +3,12 @@ package main
 import "testing"
 
 func TestNormalizeServerURLDefaultsToTLS(t *testing.T) {
-	got, err := normalizeServerURL("spectre.example.com", "ws", "/agents/register")
+	got, err := normalizeServerURL("spectre.example.com", "ws", "/api/agents/register")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// A bare host must not silently downgrade to plaintext.
-	if want := "wss://spectre.example.com/agents/register"; got != want {
+	if want := "wss://spectre.example.com/api/agents/register"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
@@ -17,15 +17,15 @@ func TestNormalizeServerURLPreservesScheme(t *testing.T) {
 	cases := []struct {
 		host, scheme, want string
 	}{
-		{"wss://s.example.com", "ws", "wss://s.example.com/agents/register"},
-		{"ws://localhost:8080", "ws", "ws://localhost:8080/agents/register"},
-		{"https://s.example.com", "ws", "wss://s.example.com/agents/register"},
-		{"http://localhost:8080", "ws", "ws://localhost:8080/agents/register"},
-		{"wss://s.example.com", "http", "https://s.example.com/agents/register"},
-		{"ws://localhost:8080", "http", "http://localhost:8080/agents/register"},
+		{"wss://s.example.com", "ws", "wss://s.example.com/api/agents/register"},
+		{"ws://localhost:8080", "ws", "ws://localhost:8080/api/agents/register"},
+		{"https://s.example.com", "ws", "wss://s.example.com/api/agents/register"},
+		{"http://localhost:8080", "ws", "ws://localhost:8080/api/agents/register"},
+		{"wss://s.example.com", "http", "https://s.example.com/api/agents/register"},
+		{"ws://localhost:8080", "http", "http://localhost:8080/api/agents/register"},
 	}
 	for _, tc := range cases {
-		got, err := normalizeServerURL(tc.host, tc.scheme, "/agents/register")
+		got, err := normalizeServerURL(tc.host, tc.scheme, "/api/agents/register")
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", tc.host, err)
 		}
@@ -38,17 +38,17 @@ func TestNormalizeServerURLPreservesScheme(t *testing.T) {
 func TestNormalizeServerURLDropsSuppliedQuery(t *testing.T) {
 	// Credentials belong in the Authorization header; anything a caller tries
 	// to smuggle through the URL is discarded.
-	got, err := normalizeServerURL("wss://s.example.com/?token=leak", "ws", "/agents/register")
+	got, err := normalizeServerURL("wss://s.example.com/?token=leak", "ws", "/api/agents/register")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if want := "wss://s.example.com/agents/register"; got != want {
+	if want := "wss://s.example.com/api/agents/register"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
 func TestNormalizeServerURLRejectsEmpty(t *testing.T) {
-	if _, err := normalizeServerURL("", "ws", "/agents/register"); err == nil {
+	if _, err := normalizeServerURL("", "ws", "/api/agents/register"); err == nil {
 		t.Fatal("expected an error for an empty host")
 	}
 }

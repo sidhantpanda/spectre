@@ -22,7 +22,7 @@ CMD=(go run . run --host "$HOST_VALUE")
 
 if ! grep -q '"deviceKey"' "$DEVICE_FILE" 2>/dev/null; then
   echo "[dev] not enrolled yet; requesting an auth key from $HTTP_HOST"
-  AUTHKEY=$(curl -fsS -X POST "$HTTP_HOST/authkeys" \
+  AUTHKEY=$(curl -fsS -X POST "$HTTP_HOST/api/authkeys" \
     -H 'Content-Type: application/json' \
     -d '{"reusable":true,"description":"local development"}' 2>/dev/null |
     sed -n 's/.*"key":"\([^"]*\)".*/\1/p') || true

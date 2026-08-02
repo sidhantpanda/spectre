@@ -44,7 +44,7 @@ describe("AgentListItem", () => {
     };
     const fetchMock = globalThis.fetch as unknown as Mock;
     fetchMock.mockImplementation((url: string) => {
-      if (url === `${window.location.origin}/agents`) {
+      if (url === `${window.location.origin}/api/agents`) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve([agent]) }) as unknown as Promise<Response>;
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve([]) }) as unknown as Promise<Response>;

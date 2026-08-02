@@ -1,4 +1,4 @@
-import express, { type NextFunction, type Request, type Response } from "express";
+import express, { Router, type NextFunction, type Request, type Response } from "express";
 import {
   type AgentDependencies,
   listAgents,
@@ -8,7 +8,7 @@ import {
   refreshAllSystemInfo,
 } from "./agentRegistry";
 import { authMiddleware } from "./auth";
-import { corsOrigins } from "./config";
+import { API_PREFIX, corsOrigins } from "./config";
 import { agentRoutes } from "./routes/agentRoutes";
 import { authKeyRoutes } from "./routes/authKeyRoutes";
 import { deviceRoutes } from "./routes/deviceRoutes";
@@ -53,15 +53,22 @@ export function createApp(
     next();
   });
 
-  app.use(publicRoutes());
+  // Mounted as one subtree so route paths stay relative to API_PREFIX: the
+  // public-path allowlist in authMiddleware keeps matching "/auth/login" and
+  // friends without having to know the prefix.
+  const api = Router();
 
-  app.use(authMiddleware);
+  api.use(publicRoutes());
+
+  api.use(authMiddleware);
 
   // --- Everything below requires an admin session.
 
-  app.use(agentRoutes(deps));
-  app.use(authKeyRoutes());
-  app.use(deviceRoutes());
+  api.use(agentRoutes(deps));
+  api.use(authKeyRoutes());
+  api.use(deviceRoutes());
+
+  app.use(API_PREFIX, api);
 
   return app;
 }

@@ -19,15 +19,23 @@ start, see the [root README](../README.md).
 The agent dials out to the server over a WebSocket and **never listens on a port**. The browser connects to the server, and the server bridges terminal I/O between the two. If **tmux** is installed on the remote machine, sessions persist across browser disconnects and network drops.
 
 ```
-┌───────────┐   /terminal WS    ┌─────────────────┐   /agents/register WS   ┌───────────────┐
-│  Browser  │ ◄───────────────► │  Control Server │ ◄─────────────────────► │     Agent     │
-│ (xterm.js)│   ticket auth     │    (Node.js)    │   device key auth       │  (+ tmux) Go  │
-└───────────┘                   └─────────────────┘                         └───────────────┘
+┌───────────┐                   ┌─────────────────┐                         ┌───────────────┐
+│  Browser  │ ◄──────────────►  │      Proxy      │  ◄────────────────────► │     Agent     │
+│ (xterm.js)│   ticket auth     │     (nginx)     │   device key auth       │  (+ tmux) Go  │
+└───────────┘                   └────────┬────────┘                         └───────────────┘
                                          │                                    dials out only,
-                                         ▼                                    no open ports
-                                    spectre.db
-                          (devices, connections, hashed keys)
+                    /api/* ──────────────┼──────────────► Control Server      no open ports
+                    /*     ──────────────┘                   (Node.js)
+                                                                 │
+                                                                 ▼
+                                                            spectre.db
+                                                  (devices, connections, hashed keys)
 ```
+
+The proxy is the only published port. It routes `/api/*` to the control server
+— `/api/terminal` and `/api/agents/events` for the browser, `/api/agents/register`
+for agents — and everything else to the static web UI. Serving both from one
+origin is why there is no CORS to configure and one place to terminate TLS.
 
 Because the connection is always agent → server, Spectre works through NAT, CGNAT, and outbound-only firewalls, and there is no listening service to attack on the machines you connect to.
 
@@ -51,7 +59,7 @@ A machine waiting for interactive approval appears on the dashboard's machine li
 Spectre gives a browser a root shell. Before exposing it:
 
 - [ ] **Set a real `ADMIN_PASSWORD`** (`openssl rand -base64 24`). The server refuses to start without one.
-- [ ] **Terminate TLS** in front of the server and use `wss://` for agents. The supplied Compose file publishes only the UI's port, so it is the single place to add TLS.
+- [ ] **Terminate TLS** in front of the server and use `wss://` for agents. The supplied Compose file publishes only the proxy's port, so it is the single place to add TLS.
 - [ ] **Never set `SPECTRE_DEV_NO_AUTH`.** It is refused outright when `NODE_ENV=production`.
 - [ ] **Back up `DATA_DIR`.** Losing `spectre.db` means re-enrolling every machine.
 - [ ] **Set `TRUST_PROXY=1` only if** a proxy you control sets `X-Forwarded-For`. Otherwise the login rate limiter can be bypassed by forging the header.
@@ -71,7 +79,7 @@ pnpm install     # install workspace deps (once)
 pnpm dev         # run the API (:8080) and web UI (:5173) together
 ```
 
-Open `http://localhost:5173`. The Vite dev server proxies the API to `:8080`, so there's no CORS setup. `pnpm dev` sets `SPECTRE_DEV_NO_AUTH=1`, so there's no login screen in development.
+Open `http://localhost:5173`. The Vite dev server proxies `/api` to `:8080` — the same split the proxy container makes in production — so there's no CORS setup. `pnpm dev` sets `SPECTRE_DEV_NO_AUTH=1`, so there's no login screen in development.
 
 ### Root scripts
 
@@ -109,7 +117,13 @@ docker compose -f compose.dev.yaml logs -f server
 docker compose -f compose.dev.yaml down
 ```
 
-Web UI: `http://localhost:3000` (which proxies the API on the same origin).
+Web UI: `http://localhost:3000` — the proxy container, which also serves the API
+under `/api` on that same origin. The `server` and `web-ui` containers publish
+no ports of their own.
+
+The proxy config is bind-mounted, so editing `default.conf.template` and
+running `docker compose -f compose.dev.yaml restart proxy` picks it up — no
+rebuild.
 
 ## The agent
 
@@ -180,7 +194,7 @@ ssh <user>@<remote>
 sudo install -m 0755 /tmp/spectre-agent /usr/local/bin/spectre-agent && rm /tmp/spectre-agent
 ```
 
-**4. Enrol it against your server.** On the target, point `--host` at your control server. On a LAN without TLS that's plaintext `ws://` to the server's IP and the published web-ui port (which proxies the agent endpoint):
+**4. Enrol it against your server.** On the target, point `--host` at your control server. On a LAN without TLS that's plaintext `ws://` to the server's IP and the published proxy port; the agent appends `/api/agents/register` itself:
 
 ```bash
 # Interactive — prints a code to approve in the web UI:
@@ -282,19 +296,19 @@ The server loads the nearest `.env` file automatically (searching upward from it
 |----------|---------|-------------|
 | `ADMIN_PASSWORD` | *(none)* | **Required.** Web UI password, min 12 chars in production. Setting it turns authentication on; the server refuses to start without it unless `SPECTRE_DEV_NO_AUTH=1` |
 | `SPECTRE_DEV_NO_AUTH` | | Set to `1` to let the server start with **no** password (auth off) for local development. Ignored when `ADMIN_PASSWORD` is set — a password always means auth is on. Fatal when `NODE_ENV=production` |
-| `SPECTRE_PUBLIC_HOST` | *(auto)* | Address agents should dial, shown in the UI's enrollment command, e.g. `wss://spectre.example.com`. When unset, the UI advertises the server's detected LAN address and API port |
-| `PORT` | `8080` | HTTP/API port |
+| `SPECTRE_PUBLIC_HOST` | *(auto)* | Address agents should dial, shown in the UI's enrollment command, e.g. `wss://spectre.example.com`. When unset and `TRUST_PROXY=1`, the UI advertises the origin the browser reached the proxy on; otherwise the server's detected LAN address and `PORT` |
+| `PORT` | `8080` | HTTP/API port. Everything is served under `/api` |
 | `DATA_DIR` | `./data` | SQLite database location (`spectre.db`, written `0600`) |
 | `CORS_ORIGIN` | *(empty)* | Comma-separated allowed origins. Empty = no cross-origin access |
-| `TRUST_PROXY` | | Set to `1` only behind a proxy that sets `X-Forwarded-For` |
+| `TRUST_PROXY` | | Set to `1` only behind a proxy that sets `X-Forwarded-For` and `X-Forwarded-Proto`. The supplied proxy container does both |
 | `SPECTRE_DEBUG_TERMINAL` | | Set to `1` to log terminal output summaries. Off by default: output contains what the user typed |
 
 Authentication is on exactly when `ADMIN_PASSWORD` is set, so its state is consistent across page loads. `SPECTRE_DEV_NO_AUTH` only permits running without a password; it never overrides one.
 
 ### Authentication
 
-- **Browser → server:** `POST /auth/login` with the password returns a session token, sent as `Authorization: Bearer <token>`. Sessions idle out after 24h and expire absolutely after 7 days. Repeated failed logins lock out the client.
-- **Browser → WebSocket:** browsers can't set headers on a WebSocket handshake, so the session is exchanged via `POST /auth/ws-ticket` for a single-use ticket valid for 30 seconds, passed as `?ticket=`. Session tokens are never accepted in a URL.
+- **Browser → server:** `POST /api/auth/login` with the password returns a session token, sent as `Authorization: Bearer <token>`. Sessions idle out after 24h and expire absolutely after 7 days. Repeated failed logins lock out the client.
+- **Browser → WebSocket:** browsers can't set headers on a WebSocket handshake, so the session is exchanged via `POST /api/auth/ws-ticket` for a single-use ticket valid for 30 seconds, passed as `?ticket=`. Session tokens are never accepted in a URL.
 - **Agent → server:** `Authorization: Bearer <device key | auth key>` on the handshake. Agents are authenticated before the WebSocket is established.
 
 ### HTTP API
@@ -303,39 +317,39 @@ Public:
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /healthz` | Liveness probe |
-| `GET /version` | Server version |
-| `GET /auth/status` | `{ authEnabled: true/false }` |
-| `POST /auth/login` | `{ "password": "..." }` → `{ "token": "..." }`. Rate limited |
-| `POST /devices/approval-request` | Agent asks to be approved → `{ userCode, pollToken, expiresAt }`. Rate limited |
-| `POST /devices/approval-poll` | Agent polls → `{ status: "pending" \| "approved" \| "expired", deviceKey? }`. Rate limited |
+| `GET /api/healthz` | Liveness probe |
+| `GET /api/version` | Server version |
+| `GET /api/auth/status` | `{ authEnabled: true/false }` |
+| `POST /api/auth/login` | `{ "password": "..." }` → `{ "token": "..." }`. Rate limited |
+| `POST /api/devices/approval-request` | Agent asks to be approved → `{ userCode, pollToken, expiresAt }`. Rate limited |
+| `POST /api/devices/approval-poll` | Agent polls → `{ status: "pending" \| "approved" \| "expired", deviceKey? }`. Rate limited |
 
 Requires `Authorization: Bearer <session token>`:
 
 | Endpoint | Description |
 |----------|-------------|
-| `POST /auth/logout` | Invalidate the current session |
-| `POST /auth/ws-ticket` | → `{ ticket }` for a WebSocket upgrade |
-| `GET /agents` | List agents with status, system info, Docker containers |
-| `POST /agents/:id/command` | Push keystrokes. `{ "data": "ls\n" }` |
-| `POST /agents/refresh-docker` \| `-system` \| `-network` | Re-fetch info from all agents |
-| `POST /authkeys` | Create an auth key. `{ reusable?, expiresInMs?, description? }` → `{ key, ... }`. **The plaintext key is returned only here** |
-| `GET /authkeys` | List auth keys (hints only, never the key) |
-| `DELETE /authkeys/:id` | Revoke an auth key |
-| `GET /devices` | List enrolled devices (one per physical machine). Never includes key material |
-| `GET /devices/:id/connections` | Connection history for a device |
-| `DELETE /devices/:id` | Revoke a device and drop its live connections |
-| `GET /devices/pending` | Machines waiting for approval |
-| `POST /devices/pending/:userCode/approve` | Approve a machine. `{ name? }` |
-| `POST /devices/pending/:userCode/deny` | Deny and discard the request |
+| `POST /api/auth/logout` | Invalidate the current session |
+| `POST /api/auth/ws-ticket` | → `{ ticket }` for a WebSocket upgrade |
+| `GET /api/agents` | List agents with status, system info, Docker containers |
+| `POST /api/agents/:id/command` | Push keystrokes. `{ "data": "ls\n" }` |
+| `POST /api/agents/refresh-docker` \| `-system` \| `-network` | Re-fetch info from all agents |
+| `POST /api/authkeys` | Create an auth key. `{ reusable?, expiresInMs?, description? }` → `{ key, ... }`. **The plaintext key is returned only here** |
+| `GET /api/authkeys` | List auth keys (hints only, never the key) |
+| `DELETE /api/authkeys/:id` | Revoke an auth key |
+| `GET /api/devices` | List enrolled devices (one per physical machine). Never includes key material |
+| `GET /api/devices/:id/connections` | Connection history for a device |
+| `DELETE /api/devices/:id` | Revoke a device and drop its live connections |
+| `GET /api/devices/pending` | Machines waiting for approval |
+| `POST /api/devices/pending/:userCode/approve` | Approve a machine. `{ name? }` |
+| `POST /api/devices/pending/:userCode/deny` | Deny and discard the request |
 
 WebSocket:
 
 | Path | Auth | Description |
 |------|------|-------------|
-| `WS /terminal?id=<agentId>&ticket=<t>` | Single-use ticket | Browser terminal I/O |
-| `WS /agents/events?ticket=<t>` | Single-use ticket | Live agent status stream |
-| `WS /agents/register` | `Authorization: Bearer <device key \| auth key>` | Agent registration |
+| `WS /api/terminal?id=<agentId>&ticket=<t>` | Single-use ticket | Browser terminal I/O |
+| `WS /api/agents/events?ticket=<t>` | Single-use ticket | Live agent status stream |
+| `WS /api/agents/register` | `Authorization: Bearer <device key \| auth key>` | Agent registration |
 
 ### Device store
 
@@ -345,14 +359,23 @@ State lives in a SQLite database (`spectre.db` in `DATA_DIR`, via Node's built-i
 
 ## Docker images
 
-The `server` and `web-ui` images build from the **repo root** (the pnpm workspace and its single lockfile), not from their subdirectories:
+Spectre builds two images. Both build from the **repo root** (the pnpm workspace and its single lockfile), not from their subdirectories:
 
 ```bash
 docker build -f server/Dockerfile -t spectre-server .
 docker build -f web-ui/Dockerfile -t spectre-web-ui .
 ```
 
-The server image uses `pnpm deploy` to produce a self-contained production-only `node_modules`. The web UI image builds the static bundle, serves it with nginx, and **proxies the API on the same origin** (`SPECTRE_SERVER_UPSTREAM`, default `server:8080`) — which is why no CORS configuration is needed and only one port is published.
+The server image uses `pnpm deploy` to produce a self-contained production-only `node_modules`. The web UI image builds the static bundle and serves it with nginx — static files only, no proxying.
+
+**The proxy is stock `nginx:1.29.4-alpine`** — there is nothing to build or publish. Compose mounts `default.conf.template` at `/etc/nginx/templates/`, and the image's own entrypoint runs `envsubst` over it at start, writing `/etc/nginx/conf.d/default.conf`. Two variables are filled in:
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `SPECTRE_SERVER_UPSTREAM` | `server:8080` | Where `/api/*` goes |
+| `SPECTRE_WEB_UI_UPSTREAM` | `web-ui:80` | Where everything else goes |
+
+`NGINX_ENVSUBST_FILTER=^SPECTRE_` keeps envsubst off nginx's own runtime variables (`$host`, `$http_upgrade`, …), which would otherwise be blanked out. The proxy is the only container that publishes a port, which is why no CORS configuration is needed and there is a single place to terminate TLS.
 
 ## Releases
 
@@ -362,6 +385,8 @@ Everything ships from **one tag**. Push a `v*` tag (e.g. `v1.2.3`) and the `Rele
 2. builds + pushes the **web-ui** image to `ghcr.io/sidhantpanda/spectre/web-ui`,
 3. cross-compiles the **agent** binaries (linux/darwin, amd64/arm64), and
 4. publishes a **GitHub release** for the tag with the agent binaries attached.
+
+The proxy is stock nginx, so no third image is built or released.
 
 ```bash
 git tag v1.2.3

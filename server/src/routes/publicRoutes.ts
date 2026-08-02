@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { isAuthEnabled, login } from "../auth";
 import { PORT, PUBLIC_HOST } from "../config";
 import { createPendingDevice, isInitialized as isDeviceStoreInitialized, pollPendingDevice } from "../deviceStore";
-import { clientKey, primaryHostAddress } from "../utils/net";
+import { clientKey, forwardedWsHost, primaryHostAddress } from "../utils/net";
 import { rateLimit } from "../utils/rateLimit";
 import { getServerVersion } from "../version";
 
@@ -24,10 +24,14 @@ export function publicRoutes(): Router {
 
   // Where an agent should dial to reach this server. Used to build the
   // enrollment command in the UI so it shows a reachable address, not the
-  // browser's own URL. Behind a TLS proxy, set SPECTRE_PUBLIC_HOST; otherwise
-  // the server advertises its detected LAN address and API port.
-  router.get("/connect-info", (_req: Request, res: Response) => {
-    const host = PUBLIC_HOST || `ws://${primaryHostAddress()}:${PORT}`;
+  // browser's own URL.
+  //
+  // SPECTRE_PUBLIC_HOST wins when set. Otherwise, behind the reverse proxy,
+  // the origin the browser reached us on is the reachable one — this server's
+  // own address and PORT are container-internal and published nowhere. Only
+  // a direct, unproxied deployment falls through to the detected LAN address.
+  router.get("/connect-info", (req: Request, res: Response) => {
+    const host = PUBLIC_HOST || forwardedWsHost(req) || `ws://${primaryHostAddress()}:${PORT}`;
     res.json({ host });
   });
 

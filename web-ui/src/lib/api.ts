@@ -13,8 +13,18 @@ const ENV_BASE =
     ? (import.meta.env.SPECTRE_SERVER_HOST as string)
     : undefined);
 
+/** The origin serving this page, or the API's own origin when it is elsewhere. */
+export function getServerOrigin() {
+  return (ENV_BASE ?? window.location.origin).replace(/\/+$/, "");
+}
+
+/**
+ * Base for every API call. The control server mounts everything under /api,
+ * which is also how the reverse proxy tells API traffic apart from the static
+ * UI it serves on the same origin.
+ */
 export function getApiBase() {
-  return ENV_BASE ?? window.location.origin;
+  return `${getServerOrigin()}/api`;
 }
 
 /**
@@ -27,7 +37,9 @@ export function getApiBase() {
  */
 export async function buildWsUrl(path: string, apiBase?: string): Promise<string> {
   const base = apiBase && apiBase.length > 0 ? apiBase : getApiBase();
-  const url = new URL(path, base);
+  // Concatenated, not resolved: `new URL("/terminal", ".../api")` would discard
+  // the /api prefix, since a root-relative path replaces the whole base path.
+  const url = new URL(`${base}${path}`);
   url.protocol = url.protocol.replace("http", "ws");
 
   const res = await authFetch(`${base}/auth/ws-ticket`, { method: "POST" });

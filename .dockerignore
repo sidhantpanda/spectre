@@ -17,5 +17,6 @@ server/data
 .env
 .env.*
 compose*.yaml
+default.conf.template
 LICENSE
 README.md

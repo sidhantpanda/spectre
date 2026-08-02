@@ -49,7 +49,7 @@ func enrollInteractively(host, deviceID string) (string, error) {
 	baseErr := "interactive enrollment"
 
 	hostname, _ := os.Hostname()
-	reqURL, err := normalizeServerURL(host, "http", "/devices/approval-request")
+	reqURL, err := normalizeServerURL(host, "http", "/api/devices/approval-request")
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", baseErr, err)
 	}
@@ -65,7 +65,7 @@ func enrollInteractively(host, deviceID string) (string, error) {
 	fmt.Fprintf(os.Stderr, "    Code:  %s\n\n", approval.UserCode)
 	fmt.Fprintf(os.Stderr, "Waiting for approval...\n")
 
-	pollURL, err := normalizeServerURL(host, "http", "/devices/approval-poll")
+	pollURL, err := normalizeServerURL(host, "http", "/api/devices/approval-poll")
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", baseErr, err)
 	}
@@ -96,7 +96,7 @@ func enrollInteractively(host, deviceID string) (string, error) {
 // enrollWithAuthKey trades an auth key for this machine's device key in a
 // single connection, so the auth key is never written to the service file.
 func enrollWithAuthKey(host, authKey, deviceID string) (string, error) {
-	wsURL, err := normalizeServerURL(host, "ws", "/agents/register")
+	wsURL, err := normalizeServerURL(host, "ws", "/api/agents/register")
 	if err != nil {
 		return "", err
 	}

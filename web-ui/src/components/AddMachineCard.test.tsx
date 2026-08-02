@@ -8,7 +8,7 @@ describe("AddMachineCard", () => {
   it("creates an auth key and shows the enrollment command", async () => {
     const fetchMock = globalThis.fetch as unknown as Mock;
     fetchMock.mockImplementation((url: string) => {
-      if (url === `${window.location.origin}/authkeys`) {
+      if (url === `${window.location.origin}/api/authkeys`) {
         return Promise.resolve({
           ok: true,
           json: () =>
@@ -32,7 +32,7 @@ describe("AddMachineCard", () => {
     fireEvent.click(screen.getByRole("button", { name: /create auth key/i }));
 
     await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([url]) => url === `${window.location.origin}/authkeys`)).toBe(true),
+      expect(fetchMock.mock.calls.some(([url]) => url === `${window.location.origin}/api/authkeys`)).toBe(true),
     );
 
     // The plaintext key is returned once, so the UI must surface it in a

@@ -26,6 +26,32 @@ export function clientKey(req: Request | IncomingMessage): string {
   return req.socket.remoteAddress ?? "unknown";
 }
 
+function firstHeader(req: Request | IncomingMessage, name: string): string | undefined {
+  const raw = req.headers[name];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return value?.split(",")[0]?.trim() || undefined;
+}
+
+/**
+ * The origin the browser actually used to reach us, as a ws:// or wss:// URL.
+ *
+ * This is the right thing to advertise to agents in a proxied deployment: the
+ * server's own LAN address and PORT are container-internal there (a Docker
+ * bridge IP on a port that is never published), while the address the browser
+ * reached is by definition routable and already points at the published port.
+ *
+ * Only consulted when TRUST_PROXY=1, for the same reason as clientKey: these
+ * headers are attacker-controlled unless a proxy the operator owns overwrites
+ * them. Returns undefined when there is nothing trustworthy to report.
+ */
+export function forwardedWsHost(req: Request | IncomingMessage): string | undefined {
+  if (process.env.TRUST_PROXY !== "1") return undefined;
+  const host = firstHeader(req, "x-forwarded-host") ?? firstHeader(req, "host");
+  // Reject anything that isn't a bare host[:port] rather than advertise junk.
+  if (!host || !/^[A-Za-z0-9.\-[\]]+(:\d+)?$/.test(host)) return undefined;
+  return `${firstHeader(req, "x-forwarded-proto") === "https" ? "wss" : "ws"}://${host}`;
+}
+
 /** Strips the query string so credentials never reach the logs. */
 export function safePath(url: string | undefined): string {
   if (!url) return "";

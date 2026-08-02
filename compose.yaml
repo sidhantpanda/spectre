@@ -4,8 +4,9 @@
 # Spectre will not start without ADMIN_PASSWORD. Generate one with:
 #     export ADMIN_PASSWORD=$(openssl rand -base64 24)
 #
-# The web-ui container proxies the API on its own origin, so only one port is
-# published and the control server is reachable only from inside this network.
+# Three services behind one port. The proxy is the only thing published; it
+# routes /api/* to the control server and everything else to the static web UI,
+# both of which stay unreachable from outside this network.
 services:
   server:
     image: ghcr.io/sidhantpanda/spectre/server:${SERVER_VERSION:-latest}
@@ -15,9 +16,13 @@ services:
       - PORT=8080
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:?ADMIN_PASSWORD is required. Generate one with `openssl rand -base64 24`}
       - DATA_DIR=/data
-      # The UI proxy is the only client and it sets X-Forwarded-For, so the
-      # login rate limiter can trust that header here.
+      # The proxy is the only client and it sets X-Forwarded-For/-Proto, so the
+      # login rate limiter and the advertised agent address can trust them.
       - TRUST_PROXY=1
+      # Set this when agents should dial a fixed public address, e.g.
+      # wss://spectre.example.com. Otherwise the UI advertises whatever origin
+      # the browser used to reach the proxy.
+      - SPECTRE_PUBLIC_HOST=${SPECTRE_PUBLIC_HOST:-}
     volumes:
       - server_data:/data
     expose:
@@ -27,14 +32,31 @@ services:
     image: ghcr.io/sidhantpanda/spectre/web-ui:${WEB_UI_VERSION:-latest}
     container_name: spectre-web-ui
     restart: unless-stopped
+    environment:
+      # Empty: the browser reaches the API on this same origin, under /api.
+      - SPECTRE_SERVER_HOST=
+    expose:
+      - "80"
+
+  # Stock nginx: the routing lives entirely in the mounted template, which the
+  # image's entrypoint runs envsubst over at start. Nothing to build or publish.
+  proxy:
+    image: nginx:1.29.4-alpine
+    container_name: spectre-proxy
+    restart: unless-stopped
     depends_on:
       - server
+      - web-ui
     ports:
-      - "${WEB_UI_PORT:-3000}:80"
+      - "${SPECTRE_PORT:-3000}:80"
+    volumes:
+      - ./default.conf.template:/etc/nginx/templates/default.conf.template:ro
     environment:
-      # Empty: the browser reaches the API on this same origin via the proxy.
-      - SPECTRE_SERVER_HOST=
       - SPECTRE_SERVER_UPSTREAM=server:8080
+      - SPECTRE_WEB_UI_UPSTREAM=web-ui:80
+      # Substitute only our own variables, so nginx's $host, $http_upgrade and
+      # friends survive envsubst untouched.
+      - NGINX_ENVSUBST_FILTER=^SPECTRE_
 
 volumes:
   server_data:

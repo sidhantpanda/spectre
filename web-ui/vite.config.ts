@@ -10,47 +10,13 @@ const CONTROL_SERVER_TARGET =
 export default defineConfig({
   plugins: [react()],
   server: {
+    // One rule, mirroring what the proxy container does in production: the
+    // whole API lives under /api, everything else is served by Vite.
     proxy: {
-      "/agents": {
+      "/api": {
         target: CONTROL_SERVER_TARGET,
         changeOrigin: true,
         ws: true,
-        secure: false,
-      },
-      "/terminal": {
-        target: CONTROL_SERVER_TARGET,
-        changeOrigin: true,
-        ws: true,
-        secure: false,
-      },
-      "/auth": {
-        target: CONTROL_SERVER_TARGET,
-        changeOrigin: true,
-        secure: false,
-      },
-      "/devices": {
-        target: CONTROL_SERVER_TARGET,
-        changeOrigin: true,
-        secure: false,
-      },
-      "/authkeys": {
-        target: CONTROL_SERVER_TARGET,
-        changeOrigin: true,
-        secure: false,
-      },
-      "/connect-info": {
-        target: CONTROL_SERVER_TARGET,
-        changeOrigin: true,
-        secure: false,
-      },
-      "/healthz": {
-        target: CONTROL_SERVER_TARGET,
-        changeOrigin: true,
-        secure: false,
-      },
-      "/version": {
-        target: CONTROL_SERVER_TARGET,
-        changeOrigin: true,
         secure: false,
       },
     },

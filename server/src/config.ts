@@ -1,4 +1,10 @@
 export const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
+
+// Every HTTP route and WebSocket endpoint lives under this prefix, including
+// the agent's. It is what lets the reverse proxy split traffic on the path
+// alone: /api/* to this server, everything else to the static web UI.
+export const API_PREFIX = "/api";
+
 export const DATA_DIR = process.env.DATA_DIR || "./data";
 export const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 
