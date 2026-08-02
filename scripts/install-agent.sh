@@ -156,8 +156,9 @@ if [[ -z "$HOST" ]]; then
   echo "     sudo spectre-agent up --host wss://<server-host> --authkey sk_..."
   echo ""
   echo "Useful commands:"
-  echo "  spectre-agent status    Check if the agent is running"
-  echo "  sudo spectre-agent down Stop and remove the service"
+  echo "  spectre-agent status      Check if the agent is running"
+  echo "  sudo spectre-agent update Upgrade to the latest release"
+  echo "  sudo spectre-agent down   Stop and remove the service"
   echo "  spectre-agent --help    Show all options"
   exit 0
 fi

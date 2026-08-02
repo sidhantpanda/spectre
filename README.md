@@ -95,7 +95,20 @@ curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/i
 
 Either way the machine enrolls, stores a device key, installs itself as a service, and reconnects on boot. Click it in the UI to open a terminal.
 
-### 3. Remove a machine
+### 3. Update a machine
+
+On the machine itself:
+
+```bash
+sudo spectre-agent update
+```
+
+It pulls the latest release from GitHub, replaces the binary, and restarts the
+service. The machine **stays enrolled** — no new auth key, no re-approval.
+`--check` reports whether an update is available without installing it, and
+`--tag v1.2.3` pins a specific release.
+
+### 4. Remove a machine
 
 To uninstall the agent, run this on the machine itself:
 

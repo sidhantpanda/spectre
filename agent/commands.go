@@ -65,6 +65,30 @@ func newDownCommand() *cobra.Command {
 	return cmd
 }
 
+func newUpdateCommand() *cobra.Command {
+	var opts updateOptions
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update the agent to the latest GitHub release",
+		Long: "Downloads the newest release for this machine's OS and architecture,\n" +
+			"replaces this binary with it, and restarts the service if one is installed.\n\n" +
+			"Enrollment is left alone: the machine keeps its device key and needs no\n" +
+			"new auth key. Updating a system-wide install needs root.",
+		Example: "  sudo spectre-agent update\n" +
+			"  spectre-agent update --check\n" +
+			"  sudo spectre-agent update --tag v1.2.3",
+		SilenceUsage: true,
+		Args:         cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return runUpdate(opts)
+		},
+	}
+	cmd.Flags().BoolVar(&opts.checkOnly, "check", false, "Only report whether an update is available")
+	cmd.Flags().StringVar(&opts.tag, "tag", "", "Release to install, e.g. v1.2.3. Defaults to the latest")
+	cmd.Flags().BoolVar(&opts.force, "force", false, "Reinstall even if already on that version")
+	return cmd
+}
+
 func newStatusCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:          "status",

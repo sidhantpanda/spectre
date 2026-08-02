@@ -243,10 +243,42 @@ The key is written to the service's own state directory (`/var/lib/spectre-agent
 ```bash
 spectre-agent status              # running state, pid, device id, service status
 sudo spectre-agent up --host ...  # enrol, install as a service, and start
+sudo spectre-agent update         # upgrade to the latest release, in place
 sudo spectre-agent down           # stop and remove the service
 sudo spectre-agent down --purge   # also delete the device key
 spectre-agent run --host ...      # run in the foreground (Ctrl+C to stop)
 ```
+
+### Updating an agent
+
+`spectre-agent update` asks GitHub for the newest release, downloads the build
+for the machine's OS and architecture, replaces the binary in place, and
+restarts the service so the new version is what is actually running.
+
+```bash
+spectre-agent update --check         # is there a newer release? changes nothing
+sudo spectre-agent update            # install the latest
+sudo spectre-agent update --tag v1.2.3   # pin a version, or roll back
+sudo spectre-agent update --force    # reinstall the version already running
+```
+
+**It does not re-enrol.** The device key lives in the agent's state directory,
+which the update never touches, so the machine keeps its identity and needs no
+new auth key — it reconnects as the same device it already was.
+
+Notes:
+
+- Updating a system-wide install writes to `/usr/local/bin`, so it needs root.
+  Without it the command stops before downloading anything and says so.
+- The downloaded binary is run once before it is installed. A truncated
+  download or a wrong-architecture asset fails there, leaving the working
+  binary in place.
+- The swap is a rename within one directory, so it is atomic — an interrupted
+  update never leaves a half-written agent behind. Replacing the file of a
+  running process is safe on Linux and macOS; the old process keeps running
+  until the service restarts.
+- Unauthenticated GitHub API calls are rate-limited per IP (60/hour). If you
+  hit that, pass `--tag` to skip the lookup.
 
 | Flag | Description |
 |------|-------------|

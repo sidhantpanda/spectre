@@ -51,7 +51,7 @@ func newRootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&host, "host", "", hostFlagDoc)
 	cmd.Flags().StringVar(&authKey, "authkey", "", authKeyFlagDoc)
 
-	cmd.AddCommand(newRunCommand(), newUpCommand(), newDownCommand(), newStatusCommand())
+	cmd.AddCommand(newRunCommand(), newUpCommand(), newDownCommand(), newUpdateCommand(), newStatusCommand())
 	return cmd
 }
 
