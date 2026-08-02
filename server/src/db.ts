@@ -96,6 +96,20 @@ CREATE TABLE IF NOT EXISTS connections (
   close_reason     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_connections_device ON connections(device_id, connected_at);
+
+-- When a browser actually opened a shell on a machine, as opposed to the
+-- agent's own socket being up (that is 'connections' above). One row per
+-- create/attach; the newest is the machine's "last connected".
+CREATE TABLE IF NOT EXISTS access_history (
+  id           TEXT PRIMARY KEY,
+  device_id    TEXT NOT NULL,
+  identity     TEXT,
+  session_id   TEXT,
+  kind         TEXT NOT NULL,
+  accessed_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_access_history_device ON access_history(device_id, accessed_at);
+CREATE INDEX IF NOT EXISTS idx_access_history_identity ON access_history(identity, accessed_at);
 `;
 
 export function openDatabase(dataDir: string): DatabaseSyncType {

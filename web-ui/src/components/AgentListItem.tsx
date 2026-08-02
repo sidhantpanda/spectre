@@ -97,9 +97,15 @@ export function AgentListItem({ agent, removing, onOpen, onRemove }: Props) {
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-2 text-right text-xs text-muted-foreground">
-          <p>
-            {agent.status === "connecting" ? "Enrolled" : "Last seen"}: {formatTimestamp(agent.lastSeen)}
-          </p>
+          {/* "Last seen" only says something once a machine has dropped: while
+              it is connected the heartbeat keeps it at "just now". A machine
+              still on its way in shows when it was enrolled instead. */}
+          {agent.status === "connecting" && <p>Enrolled: {formatTimestamp(agent.lastSeen)}</p>}
+          {agent.status === "disconnected" && <p>Last seen: {formatTimestamp(agent.lastSeen)}</p>}
+
+          {/* When someone last actually opened a shell here, as opposed to the
+              machine merely being online. Absent until it has been used once. */}
+          <p>Last connected: {agent.lastConnectedAt ? formatTimestamp(agent.lastConnectedAt) : "never"}</p>
           {agent.status !== "connected" && (
             <Button
               variant="ghost"

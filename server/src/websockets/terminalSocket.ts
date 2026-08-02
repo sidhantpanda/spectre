@@ -2,6 +2,7 @@ import { type IncomingMessage } from "http";
 import WebSocket, { type RawData, WebSocketServer } from "ws";
 import { v4 as uuid } from "uuid";
 import { currentAgent, pushToAgent } from "../agentRegistry";
+import { recordSessionAccess, type SessionAccessKind } from "../deviceStore";
 import { type ControlMessage } from "../types";
 import { MAX_UI_MESSAGE_BYTES, uiClients, type Viewer } from "./clients";
 
@@ -40,6 +41,17 @@ export function handleUiConnection(uiWss: WebSocketServer) {
       } catch (err) {
         send({ type: "error", message: (err as Error).message });
         return false;
+      }
+    };
+
+    // Stamps "last connected" for the machine. Only a real session counts:
+    // opening the terminal page just lists sessions, and listing is not using
+    // the machine. Never let a bookkeeping failure break the terminal.
+    const noteAccess = (kind: SessionAccessKind, sessionId: string) => {
+      try {
+        recordSessionAccess(entry.record.id, { identity: entry.record.identity, sessionId, kind });
+      } catch (err) {
+        console.warn(`[ui terminal] could not record access for ${agentId}: ${(err as Error).message}`);
       }
     };
 
@@ -99,6 +111,7 @@ export function handleUiConnection(uiWss: WebSocketServer) {
           const sessionId = `spectre-${uuid()}`;
           viewer.sessionId = sessionId;
           if (toAgent({ type: "createSession", sessionId, ...geometry() })) {
+            noteAccess("create", sessionId);
             send({ type: "attached", sessionId });
           }
           return;
@@ -107,6 +120,7 @@ export function handleUiConnection(uiWss: WebSocketServer) {
           if (typeof parsed.sessionId !== "string" || !parsed.sessionId) return;
           viewer.sessionId = parsed.sessionId;
           if (toAgent({ type: "attachSession", sessionId: parsed.sessionId, ...geometry() })) {
+            noteAccess("attach", parsed.sessionId);
             send({ type: "attached", sessionId: parsed.sessionId });
           }
           return;

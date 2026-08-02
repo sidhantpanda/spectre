@@ -35,6 +35,11 @@ export interface AgentRecord {
   connectionId: string;
   status: AgentStatus;
   lastSeen: number;
+  /**
+   * When a browser last opened a shell here. Undefined until someone does.
+   * Unlike lastSeen, this does not move while the machine merely sits online.
+   */
+  lastConnectedAt?: number;
   deviceId?: string;
   /** Stable hardware identity; one physical machine keeps this across reconnects. */
   identity?: string;

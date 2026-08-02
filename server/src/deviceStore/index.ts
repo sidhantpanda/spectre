@@ -25,4 +25,6 @@ export * from "./runtime";
 
 export { listAgentRecords, canonicalAgentRecordFor, listDevices, listConnections } from "./reads";
 
+export { recordSessionAccess, lastConnectedAtFor, type SessionAccessKind } from "./accessHistory";
+
 export * from "./mutations";

@@ -7,8 +7,20 @@ import {
   type SystemInfo,
 } from "../types";
 import { getDb } from "../db";
+import { lastConnectedAtFor, lastConnectedIndex } from "./accessHistory";
 import { deviceStoreIdsFor } from "./mutations";
 import { type DeviceRow, type PublicDevice, parseJson } from "./types";
+
+/**
+ * Resolves a row's "last connected" from a prebuilt index, preferring the
+ * identity group so every credential row for one machine agrees.
+ */
+type LastConnectedLookup = (row: DeviceRow) => number | undefined;
+
+function indexedLookup(): LastConnectedLookup {
+  const { byIdentity, byDevice } = lastConnectedIndex();
+  return (row) => (row.identity ? byIdentity.get(row.identity) : undefined) ?? byDevice.get(row.id);
+}
 
 // --- Reads: device lists ---------------------------------------------------
 
@@ -39,11 +51,12 @@ function canonicalRows(): DeviceRow[] {
   return Array.from(best.values());
 }
 
-function rowToAgentRecord(row: DeviceRow): AgentRecord {
+function rowToAgentRecord(row: DeviceRow, lastConnectedAt?: number): AgentRecord {
   return {
     id: row.id,
     connectionId: row.id,
     address: row.last_address ?? "",
+    lastConnectedAt,
     // first_seen is stamped on the device's first hello. A row that has one but
     // no live socket has genuinely dropped; one without has only just been
     // issued a credential and is still on its way in, which is not the same
@@ -65,8 +78,9 @@ function rowToAgentRecord(row: DeviceRow): AgentRecord {
 
 /** For the dashboard: one AgentRecord per physical device. */
 export function listAgentRecords(): AgentRecord[] {
+  const lookup = indexedLookup();
   return canonicalRows()
-    .map(rowToAgentRecord)
+    .map((row) => rowToAgentRecord(row, lookup(row)))
     .sort((a, b) => b.lastSeen - a.lastSeen);
 }
 
@@ -79,27 +93,30 @@ export function canonicalAgentRecordFor(deviceStoreId: string): AgentRecord | nu
   const db = getDb();
   const row = db.prepare("SELECT * FROM devices WHERE id = ?").get(deviceStoreId) as DeviceRow | undefined;
   if (!row) return null;
-  if (!row.identity) return rowToAgentRecord(row);
+  // A single row: one targeted lookup rather than indexing the whole table.
+  const withAccess = (r: DeviceRow) => rowToAgentRecord(r, lastConnectedAtFor(r.id, r.identity));
+  if (!row.identity) return withAccess(row);
 
   const rows = db.prepare("SELECT * FROM devices WHERE identity = ? AND revoked_at IS NULL").all(row.identity) as DeviceRow[];
-  if (rows.length === 0) return rowToAgentRecord(row);
+  if (rows.length === 0) return withAccess(row);
 
   const rank = (r: DeviceRow) => (r.status === "connected" ? 1 : 0);
   let best = rows[0];
   for (const r of rows) {
     if (rank(r) > rank(best) || (rank(r) === rank(best) && r.last_seen > best.last_seen)) best = r;
   }
-  return rowToAgentRecord(best);
+  return withAccess(best);
 }
 
 /** For device management: one PublicDevice per physical device. */
 export function listDevices(): PublicDevice[] {
+  const lookup = indexedLookup();
   return canonicalRows()
-    .map(rowToPublicDevice)
+    .map((row) => rowToPublicDevice(row, lookup(row)))
     .sort((a, b) => b.lastSeen - a.lastSeen);
 }
 
-function rowToPublicDevice(row: DeviceRow): PublicDevice {
+function rowToPublicDevice(row: DeviceRow, lastConnectedAt?: number): PublicDevice {
   return {
     id: row.id,
     deviceId: row.agent_device_id ?? undefined,
@@ -109,13 +126,14 @@ function rowToPublicDevice(row: DeviceRow): PublicDevice {
     enrolledAt: row.enrolled_at,
     firstSeen: row.first_seen ?? undefined,
     lastSeen: row.last_seen,
+    lastConnectedAt,
     revoked: Boolean(row.revoked_at),
   };
 }
 
 export function getPublicDevice(id: string): PublicDevice | null {
   const row = getDb().prepare("SELECT * FROM devices WHERE id = ?").get(id) as DeviceRow | undefined;
-  return row ? rowToPublicDevice(row) : null;
+  return row ? rowToPublicDevice(row, lastConnectedAtFor(row.id, row.identity)) : null;
 }
 
 // --- Connection history ----------------------------------------------------

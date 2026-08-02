@@ -46,6 +46,12 @@ export type Agent = {
   address: string;
   status: AgentStatus;
   lastSeen: number;
+  /**
+   * When a browser last opened a shell here, from the server's access history.
+   * Undefined until someone has. Unlike lastSeen it does not move while the
+   * machine merely sits online.
+   */
+  lastConnectedAt?: number;
   deviceId?: string;
   /** Stable hardware identity; one physical machine keeps this across reconnects. */
   identity?: string;
@@ -85,13 +91,13 @@ export function agentDisplayName(agent: Agent) {
   return agent.fingerprint?.hostname ?? displayDeviceId(agent);
 }
 
-export type AgentSort = "name-asc" | "name-desc" | "last-seen-desc" | "last-seen-asc";
+export type AgentSort = "name-asc" | "name-desc" | "last-connected-desc" | "last-connected-asc";
 
 export const AGENT_SORTS: { value: AgentSort; label: string }[] = [
   { value: "name-asc", label: "Name (A–Z)" },
   { value: "name-desc", label: "Name (Z–A)" },
-  { value: "last-seen-desc", label: "Recently seen" },
-  { value: "last-seen-asc", label: "Earliest seen" },
+  { value: "last-connected-desc", label: "Recently connected" },
+  { value: "last-connected-asc", label: "Earliest connected" },
 ];
 
 export const DEFAULT_AGENT_SORT: AgentSort = "name-asc";
@@ -103,13 +109,28 @@ export function isAgentSort(value: unknown): value is AgentSort {
 /**
  * Orders the machine list. Returns a new array — the caller's list is state.
  *
- * The two time sorts fall back to the name so the order is total: connected
- * machines refresh lastSeen on every heartbeat, and without a tiebreak rows
- * with equal timestamps could swap places on an unrelated re-render.
+ * The time sorts fall back to the name so the order is total: without a
+ * tiebreak, rows with equal timestamps could swap places on an unrelated
+ * re-render.
  */
 export function sortAgents(agents: Agent[], sort: AgentSort): Agent[] {
   const byName = (a: Agent, b: Agent) =>
     agentDisplayName(a).localeCompare(agentDisplayName(b), undefined, { sensitivity: "base" });
+
+  /**
+   * A machine nobody has ever opened sorts last in *both* directions, rather
+   * than being treated as timestamp 0. "Earliest connected" is a question it
+   * has no answer to, so leading the list with it would misread as "this is
+   * the one you have not touched in longest".
+   */
+  const byLastConnected = (a: Agent, b: Agent, newestFirst: boolean) => {
+    if (a.lastConnectedAt === undefined || b.lastConnectedAt === undefined) {
+      if (a.lastConnectedAt === b.lastConnectedAt) return byName(a, b);
+      return a.lastConnectedAt === undefined ? 1 : -1;
+    }
+    const delta = newestFirst ? b.lastConnectedAt - a.lastConnectedAt : a.lastConnectedAt - b.lastConnectedAt;
+    return delta || byName(a, b);
+  };
 
   return [...agents].sort((a, b) => {
     switch (sort) {
@@ -117,10 +138,10 @@ export function sortAgents(agents: Agent[], sort: AgentSort): Agent[] {
         return byName(a, b);
       case "name-desc":
         return byName(b, a);
-      case "last-seen-desc":
-        return b.lastSeen - a.lastSeen || byName(a, b);
-      case "last-seen-asc":
-        return a.lastSeen - b.lastSeen || byName(a, b);
+      case "last-connected-desc":
+        return byLastConnected(a, b, true);
+      case "last-connected-asc":
+        return byLastConnected(a, b, false);
     }
   });
 }

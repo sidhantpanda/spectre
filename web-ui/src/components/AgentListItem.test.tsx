@@ -76,4 +76,50 @@ describe("AgentListItem", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show less" }));
     expect(screen.queryByText("adguardhome")).not.toBeInTheDocument();
   });
+
+  describe("timestamps", () => {
+    const base = {
+      id: "dev-1",
+      connectionId: "c1",
+      address: "10.0.0.1:1",
+      lastSeen: Date.now(),
+      fingerprint: { hostname: "box", macAddresses: [], nics: [] },
+    };
+
+    function renderAgent(overrides: Record<string, unknown>) {
+      const fetchMock = globalThis.fetch as unknown as Mock;
+      fetchMock.mockImplementation((url: string) => {
+        if (url === `${window.location.origin}/api/agents`) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve([{ ...base, ...overrides }]),
+          }) as unknown as Promise<Response>;
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) }) as unknown as Promise<Response>;
+      });
+      renderApp();
+    }
+
+    it("hides last seen while a machine is connected", async () => {
+      renderAgent({ status: "connected", lastConnectedAt: Date.now() });
+
+      expect(await screen.findByText("box")).toBeInTheDocument();
+      expect(screen.queryByText(/Last seen:/)).not.toBeInTheDocument();
+      expect(screen.getByText(/Last connected:/)).toBeInTheDocument();
+    });
+
+    it("shows last seen once it has dropped", async () => {
+      renderAgent({ status: "disconnected" });
+
+      expect(await screen.findByText("box")).toBeInTheDocument();
+      expect(screen.getByText(/Last seen:/)).toBeInTheDocument();
+    });
+
+    it("reads never for a machine no one has opened", async () => {
+      renderAgent({ status: "connected" });
+
+      expect(await screen.findByText("box")).toBeInTheDocument();
+      expect(screen.getByText("Last connected: never")).toBeInTheDocument();
+    });
+  });
 });

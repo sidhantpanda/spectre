@@ -30,6 +30,8 @@ export interface PublicDevice {
   enrolledAt: number;
   firstSeen?: number;
   lastSeen: number;
+  /** When a browser last opened a shell here; undefined if never. */
+  lastConnectedAt?: number;
   revoked: boolean;
 }
 

@@ -15,9 +15,9 @@ describe("useAgentSort", () => {
   });
 
   it("restores a previously stored sort", () => {
-    window.localStorage.setItem(STORAGE_KEY, "last-seen-desc");
+    window.localStorage.setItem(STORAGE_KEY, "last-connected-desc");
     const { result } = renderHook(() => useAgentSort());
-    expect(result.current[0]).toBe("last-seen-desc");
+    expect(result.current[0]).toBe("last-connected-desc");
   });
 
   it("persists a change", () => {
@@ -31,11 +31,11 @@ describe("useAgentSort", () => {
 
   it("survives a remount", () => {
     const first = renderHook(() => useAgentSort());
-    act(() => first.result.current[1]("last-seen-asc"));
+    act(() => first.result.current[1]("last-connected-asc"));
     first.unmount();
 
     const { result } = renderHook(() => useAgentSort());
-    expect(result.current[0]).toBe("last-seen-asc");
+    expect(result.current[0]).toBe("last-connected-asc");
   });
 
   it("falls back to the default when the stored value is not a known sort", () => {

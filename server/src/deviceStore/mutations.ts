@@ -43,6 +43,7 @@ export function deleteDevice(id: string): "ok" | "not_found" | "connected" {
   db.exec("BEGIN");
   try {
     db.prepare(`DELETE FROM connections WHERE device_id IN (${placeholders})`).run(...ids);
+    db.prepare(`DELETE FROM access_history WHERE device_id IN (${placeholders})`).run(...ids);
     db.prepare(`DELETE FROM devices WHERE id IN (${placeholders})`).run(...ids);
     db.exec("COMMIT");
   } catch (err) {
