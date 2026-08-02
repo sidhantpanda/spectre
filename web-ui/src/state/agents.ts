@@ -77,6 +77,54 @@ export function displayDeviceId(agent: Agent) {
   return deviceKey(agent);
 }
 
+/**
+ * The label the list shows for a machine. Sorting by name has to use exactly
+ * this, or the order would not match what the user can read on screen.
+ */
+export function agentDisplayName(agent: Agent) {
+  return agent.fingerprint?.hostname ?? displayDeviceId(agent);
+}
+
+export type AgentSort = "name-asc" | "name-desc" | "last-seen-desc" | "last-seen-asc";
+
+export const AGENT_SORTS: { value: AgentSort; label: string }[] = [
+  { value: "name-asc", label: "Name (A–Z)" },
+  { value: "name-desc", label: "Name (Z–A)" },
+  { value: "last-seen-desc", label: "Recently seen" },
+  { value: "last-seen-asc", label: "Earliest seen" },
+];
+
+export const DEFAULT_AGENT_SORT: AgentSort = "name-asc";
+
+export function isAgentSort(value: unknown): value is AgentSort {
+  return AGENT_SORTS.some((option) => option.value === value);
+}
+
+/**
+ * Orders the machine list. Returns a new array — the caller's list is state.
+ *
+ * The two time sorts fall back to the name so the order is total: connected
+ * machines refresh lastSeen on every heartbeat, and without a tiebreak rows
+ * with equal timestamps could swap places on an unrelated re-render.
+ */
+export function sortAgents(agents: Agent[], sort: AgentSort): Agent[] {
+  const byName = (a: Agent, b: Agent) =>
+    agentDisplayName(a).localeCompare(agentDisplayName(b), undefined, { sensitivity: "base" });
+
+  return [...agents].sort((a, b) => {
+    switch (sort) {
+      case "name-asc":
+        return byName(a, b);
+      case "name-desc":
+        return byName(b, a);
+      case "last-seen-desc":
+        return b.lastSeen - a.lastSeen || byName(a, b);
+      case "last-seen-asc":
+        return a.lastSeen - b.lastSeen || byName(a, b);
+    }
+  });
+}
+
 export async function fetchAgents(apiBase: string = API_BASE): Promise<Agent[]> {
   const res = await authFetch(`${apiBase}/agents`);
   if (!res.ok) throw new Error("failed to fetch agents");

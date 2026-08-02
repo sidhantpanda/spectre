@@ -1,12 +1,16 @@
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "./components/ui/badge";
 import { AddMachineCard } from "./components/AddMachineCard";
+import { AgentSortMenu } from "./components/AgentSortMenu";
 import { ConnectionsCard } from "./components/ConnectionsCard";
 import { StatusCounts } from "./components/StatusCounts";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { VersionFooter } from "./components/VersionFooter";
+import { useAgentSort } from "./hooks/useAgentSort";
 import { useDashboard } from "./hooks/useDashboard";
 import { getApiBase } from "./lib/api";
+import { sortAgents } from "./state/agents";
 
 const API_BASE = getApiBase();
 
@@ -24,6 +28,9 @@ function App() {
     handleApprovePending,
     handleRejectPending,
   } = useDashboard(API_BASE);
+
+  const [sort, setSort] = useAgentSort();
+  const sortedAgents = useMemo(() => sortAgents(dedupedAgents, sort), [dedupedAgents, sort]);
 
   return (
     // A column at least as tall as the viewport, with the content growing to
@@ -51,17 +58,25 @@ function App() {
 
         <AddMachineCard apiBase={API_BASE} />
 
-        <ConnectionsCard
-          dedupedAgents={dedupedAgents}
-          pending={pending}
-          pendingError={pendingError}
-          pendingBusy={pendingBusy}
-          removingId={removingId}
-          onApprovePending={handleApprovePending}
-          onRejectPending={handleRejectPending}
-          onOpenAgent={(agent) => navigate(`/agent/${agent.id}`)}
-          onRemoveAgent={handleRemoveAgent}
-        />
+        {/* Sits above the card, not inside it: the card header is copy about
+            what connections are, and the control belongs to the list. */}
+        <div className="space-y-2">
+          <div className="flex justify-end">
+            <AgentSortMenu value={sort} onChange={setSort} />
+          </div>
+
+          <ConnectionsCard
+            dedupedAgents={sortedAgents}
+            pending={pending}
+            pendingError={pendingError}
+            pendingBusy={pendingBusy}
+            removingId={removingId}
+            onApprovePending={handleApprovePending}
+            onRejectPending={handleRejectPending}
+            onOpenAgent={(agent) => navigate(`/agent/${agent.id}`)}
+            onRemoveAgent={handleRemoveAgent}
+          />
+        </div>
 
         <StatusCounts connectedCount={connectedAgents.length} disconnectedCount={disconnectedAgents.length} />
       </section>

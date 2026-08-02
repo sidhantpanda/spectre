@@ -3,7 +3,7 @@ import { ChevronDown, Cpu, Gauge, HardDrive, MemoryStick, Monitor, Network, Tras
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { AgentStatusDot } from "./AgentStatusDot";
-import { displayDeviceId, type Agent, type DockerContainer } from "../state/agents";
+import { agentDisplayName, type Agent, type DockerContainer } from "../state/agents";
 import { formatBytes, formatDisk, formatList, formatTimestamp, publishedPorts } from "../lib/format";
 
 type Props = {
@@ -86,7 +86,7 @@ export function AgentListItem({ agent, removing, onOpen, onRemove }: Props) {
                 {agent.agentVersion}
               </Badge>
             )}
-            <p className="font-medium">{agent.fingerprint?.hostname ?? displayDeviceId(agent)}</p>
+            <p className="font-medium">{agentDisplayName(agent)}</p>
             {agent.status === "connecting" && (
               <Badge variant="outline" className="border-amber-500/50 text-[11px]">
                 Approved — connecting
