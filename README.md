@@ -102,7 +102,7 @@ Either way the machine enrolls, stores a device key, installs itself as a servic
 upgrades itself and reconnects — it stays enrolled, so there is nothing to
 re-approve.
 
-**Or on the machine itself:**
+**On the machine itself:**
 
 ```bash
 spectre-agent update
