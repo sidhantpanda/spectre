@@ -9,17 +9,18 @@
  */
 
 const RELEASE_URL = "https://api.github.com/repos/sidhantpanda/spectre/releases/latest";
-const REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+// Short enough that a release you just cut shows up in the dashboard while
+// you are still looking at it. 12 requests an hour sits well inside GitHub's
+// unauthenticated budget of 60.
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 10_000;
 
 let latestVersion: string | undefined;
-let lastFetchedAt = 0;
 let inFlight: Promise<void> | null = null;
 
 /** Test seam. */
 export function setLatestAgentVersionForTest(version: string | undefined) {
   latestVersion = version;
-  lastFetchedAt = version ? Date.now() : 0;
 }
 
 export function getLatestAgentVersion(): string | undefined {
@@ -59,7 +60,6 @@ export async function refreshLatestAgentVersion(): Promise<void> {
       const body = (await res.json()) as { tag_name?: string };
       if (body.tag_name) {
         latestVersion = body.tag_name;
-        lastFetchedAt = Date.now();
       }
     } catch (err) {
       console.warn(`[release] could not check the latest agent release: ${(err as Error).message}`);
@@ -73,15 +73,17 @@ export async function refreshLatestAgentVersion(): Promise<void> {
 }
 
 /**
- * Warms the cache at boot and keeps it fresh. Unref'd so the timer never holds
- * the process open.
+ * Warms the cache at boot and keeps it fresh. Every tick fetches: the previous
+ * "skip if we fetched recently" guard shared its threshold with the interval,
+ * so a tick always landed a few milliseconds early and bailed, silently halving
+ * the refresh rate. `refreshLatestAgentVersion` already collapses concurrent
+ * calls, which is the only overlap worth guarding against.
+ *
+ * Unref'd so the timer never holds the process open.
  */
 export function startAgentReleaseWatch() {
   void refreshLatestAgentVersion();
-  const timer = setInterval(() => {
-    if (Date.now() - lastFetchedAt < REFRESH_INTERVAL_MS) return;
-    void refreshLatestAgentVersion();
-  }, REFRESH_INTERVAL_MS);
+  const timer = setInterval(() => void refreshLatestAgentVersion(), REFRESH_INTERVAL_MS);
   timer.unref?.();
   return () => clearInterval(timer);
 }
