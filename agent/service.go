@@ -41,6 +41,14 @@ func serviceUp(host, authKey string) error {
 		return err
 	}
 
+	// The service must be able to replace the binary it runs, or it can never
+	// update itself. Relocates it only when the current location would be
+	// read-only to the account the service runs as.
+	exe, err = resolveServiceBinary(exe)
+	if err != nil {
+		return err
+	}
+
 	serviceArgs := buildExecArgs(host)
 
 	var installErr error
@@ -69,15 +77,25 @@ func serviceUp(host, authKey string) error {
 	return nil
 }
 
+// downNeedsRoot explains a privileged failure instead of surfacing systemctl's
+// exit status. Removing a *system* service needs root; polkit may grant it
+// interactively, so this is only reached once the attempt has actually failed.
+func downNeedsRoot(err error) error {
+	if os.Geteuid() == 0 {
+		return err
+	}
+	return fmt.Errorf("%w\n\nRemoving the system service needs root. Re-run with:\n    sudo spectre-agent down", err)
+}
+
 func serviceDown(purge bool) error {
 	switch runtime.GOOS {
 	case "linux":
 		if err := uninstallSystemdService(); err != nil {
-			return err
+			return downNeedsRoot(err)
 		}
 	case "darwin":
 		if err := uninstallLaunchdService(); err != nil {
-			return err
+			return downNeedsRoot(err)
 		}
 	default:
 		return fmt.Errorf("service management is not supported on %s", runtime.GOOS)

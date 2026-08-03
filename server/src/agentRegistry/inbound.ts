@@ -3,7 +3,7 @@ import { markDeviceSeen, recordDeviceConnected, recordDeviceDisconnected, update
 import { type AgentMessage, type ControlMessage } from "../types";
 import { summarizeOutput } from "../utils/output";
 import { connections, identityToStoreId } from "./connections";
-import { emitDeviceUpdate, emitOutput } from "./events";
+import { emitDeviceUpdate, emitOutput, emitUpdateFailure } from "./events";
 import { requestDockerInfo, requestNetworkInfo, requestSystemInfo } from "./info";
 
 const MAX_AGENT_MESSAGE_BYTES = 256 * 1024;
@@ -98,6 +98,18 @@ export function registerInboundAgent(socket: WebSocket, address: string, deviceS
       case "networkInfo":
         if (payload.networkInfo) updateDeviceRuntime(deviceStoreId, { networkInfo: payload.networkInfo });
         emitDeviceUpdate(deviceStoreId);
+        return;
+      case "updateStatus":
+        // Logged, not stored: a successful update ends with the agent
+        // restarting and re-announcing its version, which is what the
+        // dashboard actually reflects. A failure is only useful in the log.
+        if (payload.state === "failed") {
+          console.warn(`[update] ${deviceStoreId} failed to update: ${payload.error ?? "unknown error"}`);
+          emitUpdateFailure(deviceStoreId, payload.error ?? "update failed");
+        } else {
+          console.log(`[update] ${deviceStoreId} ${payload.state}${payload.version ? ` ${payload.version}` : ""}`);
+        }
+        emitOutput(deviceStoreId, payload);
         return;
     }
   });

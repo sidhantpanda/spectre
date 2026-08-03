@@ -42,6 +42,10 @@ func runCommand(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	// Wired through so systemctl can put a polkit prompt in front of the user
+	// when they run something privileged without sudo, rather than failing on a
+	// prompt nobody can answer.
+	cmd.Stdin = os.Stdin
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
 	}

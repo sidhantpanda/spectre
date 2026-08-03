@@ -97,14 +97,20 @@ Either way the machine enrolls, stores a device key, installs itself as a servic
 
 ### 3. Update a machine
 
-On the machine itself:
+**From the web UI.** Connected machines running an older build show an
+**Update to vX.Y.Z** button in the machine list. Click it and that machine
+upgrades itself and reconnects — it stays enrolled, so there is nothing to
+re-approve.
+
+**Or on the machine itself:**
 
 ```bash
-sudo spectre-agent update
+spectre-agent update
 ```
 
-It pulls the latest release from GitHub, replaces the binary, and restarts the
-service. The machine **stays enrolled** — no new auth key, no re-approval.
+No sudo needed: `up` puts the binary somewhere the service account owns, and the
+restart is a signal rather than a `systemctl` call. It pulls the latest release
+from GitHub, replaces the binary, and hands the running agent over to it. The machine **stays enrolled** — no new auth key, no re-approval.
 `--check` reports whether an update is available without installing it, and
 `--tag v1.2.3` pins a specific release.
 

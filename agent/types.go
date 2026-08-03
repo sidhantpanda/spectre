@@ -59,6 +59,9 @@ type ControlMessage struct {
 	// wrapping are laid out for a window the user is not looking at.
 	Cols uint16 `json:"cols,omitempty"`
 	Rows uint16 `json:"rows,omitempty"`
+	// Version pins the release an "update" message should install. Empty means
+	// whatever GitHub currently calls latest.
+	Version string `json:"version,omitempty"`
 }
 
 // AgentMessage documents what the agent sends to the control server.
@@ -77,4 +80,8 @@ type AgentMessage struct {
 	// this host. Sent alongside a session list.
 	TmuxAvailable bool   `json:"tmuxAvailable,omitempty"`
 	Error         string `json:"error,omitempty"`
+	// State reports progress of a self-update: started, installed or failed.
+	State string `json:"state,omitempty"`
+	// Version is the release an update targeted.
+	Version string `json:"version,omitempty"`
 }

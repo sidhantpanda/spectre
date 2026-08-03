@@ -227,18 +227,15 @@ func TestCheckWritableDirRejectsUnwritableTarget(t *testing.T) {
 	}
 }
 
-// stubServiceRestart keeps a test off the machine's real init system: without
-// it, a developer box that happens to have the agent installed gets its live
-// service restarted by `go test`.
+// stubServiceRestart keeps a test off the machine's real agent: without it, a
+// developer box running one gets it signalled — and possibly restarted — by
+// `go test`.
 func stubServiceRestart(t *testing.T) *bool {
 	t.Helper()
 	called := false
-	old := restartService
-	restartService = func() (bool, error) {
-		called = true
-		return false, nil
-	}
-	t.Cleanup(func() { restartService = old })
+	old := handOff
+	handOff = func() { called = true }
+	t.Cleanup(func() { handOff = old })
 	return &called
 }
 

@@ -10,10 +10,13 @@ type Props = {
   pendingError: string | null;
   pendingBusy: string | null;
   removingId: string | null;
+  updating: Record<string, string>;
+  updateErrors: Record<string, string>;
   onApprovePending: (device: PendingDevice) => void;
   onRejectPending: (device: PendingDevice) => void;
   onOpenAgent: (agent: Agent) => void;
   onRemoveAgent: (agent: Agent) => void;
+  onUpdateAgent: (agent: Agent) => void;
 };
 
 /** The Connections card: empty state, pending rows, and the agent list. */
@@ -23,10 +26,13 @@ export function ConnectionsCard({
   pendingError,
   pendingBusy,
   removingId,
+  updating,
+  updateErrors,
   onApprovePending,
   onRejectPending,
   onOpenAgent,
   onRemoveAgent,
+  onUpdateAgent,
 }: Props) {
   return (
     <Card>
@@ -58,8 +64,11 @@ export function ConnectionsCard({
             key={agent.id}
             agent={agent}
             removing={removingId === agent.id}
+            updating={agent.id in updating}
+            updateError={updateErrors[agent.id]}
             onOpen={() => onOpenAgent(agent)}
             onRemove={() => onRemoveAgent(agent)}
+            onUpdate={() => onUpdateAgent(agent)}
           />
         ))}
       </CardContent>

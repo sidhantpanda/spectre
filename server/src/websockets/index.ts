@@ -1,10 +1,16 @@
 import { type Server as HttpServer } from "http";
 import { WebSocketServer } from "ws";
-import { onAgentOutput, onAgentStatusChange } from "../agentRegistry";
+import { onAgentOutput, onAgentStatusChange, onAgentUpdateFailure } from "../agentRegistry";
 import { onPendingDevicesChange } from "../deviceStore";
 import { handleAgentEventStream } from "./agentEvents";
 import { handleInboundAgents } from "./agentSocket";
-import { broadcastAgentEvent, broadcastPendingDevices, broadcastToUi, MAX_UI_MESSAGE_BYTES } from "./clients";
+import {
+  broadcastAgentEvent,
+  broadcastPendingDevices,
+  broadcastToUi,
+  broadcastUpdateFailure,
+  MAX_UI_MESSAGE_BYTES,
+} from "./clients";
 import { handleUiConnection } from "./terminalSocket";
 import { routeUpgrades } from "./upgrade";
 
@@ -22,6 +28,8 @@ export function attachWebSockets(httpServer: HttpServer) {
   });
 
   onAgentOutput((agentId, payload) => broadcastToUi(agentId, payload));
+
+  onAgentUpdateFailure((agentId, error) => broadcastUpdateFailure(agentId, error));
 
   onPendingDevicesChange(() => broadcastPendingDevices());
 

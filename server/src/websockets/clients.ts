@@ -58,6 +58,20 @@ export function broadcastAgentEvent(record: AgentRecord) {
 }
 
 /**
+ * Tells every open dashboard that a machine could not update itself.
+ *
+ * Without this the button sits on "Updating..." forever: it clears when the
+ * machine comes back on a new version, and a failed update means that never
+ * happens.
+ */
+export function broadcastUpdateFailure(agentId: string, error: string) {
+  const raw = JSON.stringify({ type: "updateFailed", agentId, error });
+  for (const socket of agentEventClients) {
+    if (socket.readyState === WebSocket.OPEN) socket.send(raw);
+  }
+}
+
+/**
  * Machines waiting for approval, pushed to every open dashboard.
  *
  * They are not devices yet — there is no credential and no socket — but they

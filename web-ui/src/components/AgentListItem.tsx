@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, Cpu, Gauge, HardDrive, MemoryStick, Monitor, Network, Trash2 } from "lucide-react";
+import { ArrowUpCircle, ChevronDown, Cpu, Gauge, HardDrive, MemoryStick, Monitor, Network, Trash2 } from "lucide-react";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { AgentStatusDot } from "./AgentStatusDot";
@@ -9,8 +9,11 @@ import { formatBytes, formatDisk, formatList, formatTimestamp, publishedPorts } 
 type Props = {
   agent: Agent;
   removing?: boolean;
+  updating?: boolean;
+  updateError?: string;
   onOpen: () => void;
   onRemove: () => void;
+  onUpdate: () => void;
 };
 
 /**
@@ -57,7 +60,7 @@ function ContainerBadge({ container }: { container: DockerContainer }) {
   );
 }
 
-export function AgentListItem({ agent, removing, onOpen, onRemove }: Props) {
+export function AgentListItem({ agent, removing, updating, updateError, onOpen, onRemove, onUpdate }: Props) {
   const [expanded, setExpanded] = useState(false);
   const detailsId = `agent-details-${agent.id}`;
   // Sorted on a copy: sorting agent.docker in place mutates the record held in
@@ -106,6 +109,30 @@ export function AgentListItem({ agent, removing, onOpen, onRemove }: Props) {
           {/* When someone last actually opened a shell here, as opposed to the
               machine merely being online. Absent until it has been used once. */}
           <p>Last connected: {agent.lastConnectedAt ? formatTimestamp(agent.lastConnectedAt) : "never"}</p>
+          {/* Only offered to a connected machine: the request rides its live
+              socket, so there is nowhere to send it otherwise. */}
+          {agent.status === "connected" && agent.updateAvailable && agent.latestAgentVersion && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={updating}
+              className="h-7 gap-1"
+              onClick={(e) => {
+                e.stopPropagation();
+                onUpdate();
+              }}
+            >
+              <ArrowUpCircle size={14} />
+              {updating ? "Updating..." : `Update to ${agent.latestAgentVersion}`}
+            </Button>
+          )}
+          {/* A failed update never reports a new version, so without this the
+              row would just silently stay on the old one. */}
+          {updateError && (
+            <p className="max-w-[16rem] text-right text-destructive" title={updateError}>
+              Update failed: {updateError}
+            </p>
+          )}
           {agent.status !== "connected" && (
             <Button
               variant="ghost"

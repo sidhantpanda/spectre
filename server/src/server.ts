@@ -1,6 +1,7 @@
 // Must be first: loads .env into process.env before ./config reads it.
 import "./loadEnv";
 import { createServer } from "http";
+import { startAgentReleaseWatch } from "./agentRelease";
 import { startStaleAgentSweep } from "./agentRegistry";
 import { createApp } from "./app";
 import { ConfigError, DATA_DIR, PORT, validateConfig } from "./config";
@@ -30,6 +31,8 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
 
   attachWebSockets(httpServer);
   startStaleAgentSweep();
+  // Warms the "is an update available" answer before the first dashboard load.
+  startAgentReleaseWatch();
 
   httpServer.listen(PORT, () => {
     const addresses = lanAddresses();

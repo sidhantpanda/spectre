@@ -243,7 +243,7 @@ The key is written to the service's own state directory (`/var/lib/spectre-agent
 ```bash
 spectre-agent status              # running state, pid, device id, service status
 sudo spectre-agent up --host ...  # enrol, install as a service, and start
-sudo spectre-agent update         # upgrade to the latest release, in place
+spectre-agent update              # upgrade to the latest release, in place
 sudo spectre-agent down           # stop and remove the service
 sudo spectre-agent down --purge   # also delete the device key
 spectre-agent run --host ...      # run in the foreground (Ctrl+C to stop)
@@ -251,15 +251,57 @@ spectre-agent run --host ...      # run in the foreground (Ctrl+C to stop)
 
 ### Updating an agent
 
+Two ways: from the dashboard, or on the machine itself.
+
+**From the dashboard.** The control server checks GitHub hourly for the newest
+agent release. Any connected machine running something else shows an
+**Update to vX.Y.Z** button in the machine list. Clicking it sends the request
+down that machine's existing socket; the agent downloads the release, swaps its
+binary, and exits — systemd's `Restart=always` then starts it again on the new
+build. The button reads *Updating…* until the machine reconnects reporting the
+new version, which is the real confirmation it worked.
+
+The agent exits rather than calling `systemctl restart` on itself: a service
+restarting its own unit needs privileges the service account does not have, and
+the exit achieves the same thing for free.
+
+**Where the binary lives.** Replacing a running binary means `rename(2)` —
+writing in place fails with `ETXTBSY` — and `rename` checks write permission on
+the *directory*, not the file. A `sudo` install puts the binary in root-owned
+`/usr/local/bin` but runs the service as the invoking user, which is exactly the
+combination that cannot replace itself. So `up` moves the binary to
+`/var/lib/spectre-agent/bin/spectre-agent`, hands that directory to the service
+account, and leaves a symlink at the original path:
+
+```
+/usr/local/bin/spectre-agent -> /var/lib/spectre-agent/bin/spectre-agent
+```
+
+One binary, still on `PATH` under its usual name, and the CLI and the service
+can never drift onto different versions. Nothing else about the host changes —
+no extra units, no sudoers entries. A service already running as root, or one
+whose binary sits somewhere it can already write, is left where it is.
+
+`down --purge` deletes that state directory, so it copies the binary back to
+its original path first rather than leaving a dangling symlink.
+
+The button only appears on **connected** machines — the request travels over the
+live socket, so an offline machine has nowhere to receive it. If the server
+cannot reach GitHub, no button appears at all rather than a guess. A failed
+update is reported back and shown on that machine's row, so it does not sit
+spinning.
+
+**On the machine.**
+
 `spectre-agent update` asks GitHub for the newest release, downloads the build
 for the machine's OS and architecture, replaces the binary in place, and
-restarts the service so the new version is what is actually running.
+hands the running agent over to it — no sudo required.
 
 ```bash
 spectre-agent update --check         # is there a newer release? changes nothing
-sudo spectre-agent update            # install the latest
-sudo spectre-agent update --tag v1.2.3   # pin a version, or roll back
-sudo spectre-agent update --force    # reinstall the version already running
+spectre-agent update                 # install the latest
+spectre-agent update --tag v1.2.3    # pin a version, or roll back
+spectre-agent update --force         # reinstall the version already running
 ```
 
 **It does not re-enrol.** The device key lives in the agent's state directory,
@@ -268,8 +310,14 @@ new auth key — it reconnects as the same device it already was.
 
 Notes:
 
-- Updating a system-wide install writes to `/usr/local/bin`, so it needs root.
-  Without it the command stops before downloading anything and says so.
+- **Neither kind of update needs root.** `up` has already put the binary
+  somewhere the service account owns (see *Where the binary lives* above), and
+  the restart is a signal, not a `systemctl` call: the CLI sends `SIGTERM` to
+  the running agent, which shuts down cleanly, and `Restart=always` starts the
+  new binary. Both the CLI and the control server take that route.
+- If the binary *is* somewhere you cannot write — a stock install where the
+  service runs as root — the command stops before downloading anything and
+  tells you to re-run with sudo.
 - The downloaded binary is run once before it is installed. A truncated
   download or a wrong-architecture asset fails there, leaving the working
   binary in place.
@@ -365,6 +413,7 @@ Requires `Authorization: Bearer <session token>`:
 | `GET /api/agents` | List agents with status, system info, Docker containers |
 | `POST /api/agents/:id/command` | Push keystrokes. `{ "data": "ls\n" }` |
 | `POST /api/agents/refresh-docker` \| `-system` \| `-network` | Re-fetch info from all agents |
+| `POST /api/agents/:id/update` | Ask a connected machine to upgrade itself. `{ version? }`, defaulting to the latest release. `409` when the machine is offline |
 | `POST /api/authkeys` | Create an auth key. `{ reusable?, expiresInMs?, description? }` → `{ key, ... }`. **The plaintext key is returned only here** |
 | `GET /api/authkeys` | List auth keys (hints only, never the key) |
 | `DELETE /api/authkeys/:id` | Revoke an auth key |

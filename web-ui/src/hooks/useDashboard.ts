@@ -8,6 +8,7 @@ import {
   refreshSystemInfo,
   removeAgent,
   subscribeToAgentEvents,
+  updateAgent,
 } from "../state/agents";
 import { approveDevice, denyDevice, listPendingDevices, type PendingDevice } from "../state/enrollment";
 
@@ -45,6 +46,12 @@ export function useDashboard(apiBase: string) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [pending, setPending] = useState<PendingDevice[]>([]);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  // Machines told to update, against the version they were on when asked. An
+  // update ends with the agent restarting and reconnecting, so "done" is that
+  // machine reporting a different version — not the POST returning.
+  const [updating, setUpdating] = useState<Record<string, string>>({});
+  // Why an update did not happen, kept next to the machine it belongs to.
+  const [updateErrors, setUpdateErrors] = useState<Record<string, string>>({});
   const [pendingBusy, setPendingBusy] = useState<string | null>(null);
   const [pendingError, setPendingError] = useState<string | null>(null);
 
@@ -86,7 +93,20 @@ export function useDashboard(apiBase: string) {
           return next;
         }),
       apiBase,
-      { onPending: setPending },
+      {
+        onPending: setPending,
+        // A failed update never produces a new version, so nothing else would
+        // ever clear the button's progress state.
+        onUpdateFailed: (agentId, error) => {
+          setUpdating((prev) => {
+            if (!(agentId in prev)) return prev;
+            const next = { ...prev };
+            delete next[agentId];
+            return next;
+          });
+          setUpdateErrors((prev) => ({ ...prev, [agentId]: error }));
+        },
+      },
     );
     return () => {
       clearInterval(pendingTimer);
@@ -100,6 +120,39 @@ export function useDashboard(apiBase: string) {
     () => dedupedAgents.filter((a) => a.status === "disconnected"),
     [dedupedAgents],
   );
+
+  // Clear the "Updating..." state once a machine comes back on a new version.
+  useEffect(() => {
+    setUpdating((prev) => {
+      const entries = Object.entries(prev).filter(([id, versionWhenAsked]) => {
+        const agent = dedupedAgents.find((a) => a.id === id);
+        // Gone from the list entirely: nothing left to show a spinner on.
+        if (!agent) return false;
+        return agent.agentVersion === versionWhenAsked;
+      });
+      return entries.length === Object.keys(prev).length ? prev : Object.fromEntries(entries);
+    });
+  }, [dedupedAgents]);
+
+  async function handleUpdateAgent(agent: Agent) {
+    setUpdating((prev) => ({ ...prev, [agent.id]: agent.agentVersion ?? "" }));
+    setUpdateErrors((prev) => {
+      const next = { ...prev };
+      delete next[agent.id];
+      return next;
+    });
+    try {
+      await updateAgent(agent.id, agent.latestAgentVersion, apiBase);
+    } catch (err) {
+      console.error("failed to request an update", err);
+      window.alert((err as Error).message);
+      setUpdating((prev) => {
+        const next = { ...prev };
+        delete next[agent.id];
+        return next;
+      });
+    }
+  }
 
   async function handleRemoveAgent(agent: Agent) {
     if (!window.confirm("Remove this device? It will need to be enrolled again to reconnect.")) {
@@ -155,8 +208,11 @@ export function useDashboard(apiBase: string) {
     disconnectedAgents,
     pending,
     removingId,
+    updating,
+    updateErrors,
     pendingBusy,
     pendingError,
+    handleUpdateAgent,
     handleRemoveAgent,
     handleApprovePending,
     handleRejectPending,

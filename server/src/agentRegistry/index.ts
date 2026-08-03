@@ -9,7 +9,7 @@ export type AgentDependencies = {
 };
 
 export { disconnectDevice, pushToAgent, resetAgentsForTest, startStaleAgentSweep } from "./connections";
-export { currentAgent, listAgents, onAgentOutput, onAgentStatusChange } from "./events";
+export { currentAgent, listAgents, onAgentOutput, onAgentStatusChange, onAgentUpdateFailure } from "./events";
 export { registerInboundAgent } from "./inbound";
 export {
   refreshAllDockerInfo,

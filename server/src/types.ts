@@ -47,6 +47,10 @@ export interface AgentRecord {
   enrolledAt?: number;
   firstSeen?: number;
   agentVersion?: string;
+  /** Newest published agent release, when the server has managed to look it up. */
+  latestAgentVersion?: string;
+  /** True when this machine is running something other than latestAgentVersion. */
+  updateAvailable?: boolean;
   fingerprint?: AgentFingerprint;
   docker?: DockerContainer[];
   dockerError?: string;
@@ -111,7 +115,13 @@ export type ControlMessage =
   | { type: "reset"; sessionId?: string }
   | { type: "dockerInfo" }
   | { type: "systemInfo" }
-  | { type: "networkInfo" };
+  | { type: "networkInfo" }
+  /**
+   * Asks the agent to upgrade itself in place. `version` pins a release; when
+   * absent the agent takes whatever GitHub calls latest. The agent keeps its
+   * device key, so it reconnects as the same machine on the new binary.
+   */
+  | { type: "update"; version?: string };
 
 /** Agent to server. */
 export type AgentMessage =
@@ -125,4 +135,10 @@ export type AgentMessage =
   | { type: "sessionExited"; sessionId: string }
   | { type: "dockerInfo"; containers?: DockerContainer[]; error?: string }
   | { type: "systemInfo"; systemInfo?: SystemInfo; error?: string }
-  | { type: "networkInfo"; networkInfo?: NetworkInfo; error?: string };
+  | { type: "networkInfo"; networkInfo?: NetworkInfo; error?: string }
+  /**
+   * Progress of a self-update. "installed" is followed by the agent restarting,
+   * so the confirmation that it worked is the machine reconnecting on the new
+   * version rather than any further message on this socket.
+   */
+  | { type: "updateStatus"; state: "started" | "installed" | "failed"; version?: string; error?: string };

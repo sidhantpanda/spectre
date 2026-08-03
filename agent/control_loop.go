@@ -147,6 +147,8 @@ func readFromControl(conn *safeConn, sessions *ptyManager, errCh chan<- error, r
 				errCh <- err
 				return
 			}
+		case "update":
+			handleRemoteUpdate(conn, msg.Version)
 		case "networkInfo":
 			info := collectNetworkInfo()
 			payload := AgentMessage{

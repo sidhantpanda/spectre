@@ -22,8 +22,11 @@ function App() {
     disconnectedAgents,
     pending,
     removingId,
+    updating,
+    updateErrors,
     pendingBusy,
     pendingError,
+    handleUpdateAgent,
     handleRemoveAgent,
     handleApprovePending,
     handleRejectPending,
@@ -71,10 +74,13 @@ function App() {
             pendingError={pendingError}
             pendingBusy={pendingBusy}
             removingId={removingId}
+            updating={updating}
+            updateErrors={updateErrors}
             onApprovePending={handleApprovePending}
             onRejectPending={handleRejectPending}
             onOpenAgent={(agent) => navigate(`/agent/${agent.id}`)}
             onRemoveAgent={handleRemoveAgent}
+            onUpdateAgent={handleUpdateAgent}
           />
         </div>
 

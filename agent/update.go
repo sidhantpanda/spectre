@@ -8,12 +8,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -44,6 +47,11 @@ type updateOptions struct {
 	checkOnly bool
 	// Reinstall even when the running version already matches.
 	force bool
+	// skipRestart is set when the caller *is* the supervised process and will
+	// exit to pick up the new binary. Asking systemd to restart the service
+	// from inside that service would both duplicate the exit and require root,
+	// which the service account has not got.
+	skipRestart bool
 }
 
 // Injectable for tests; the real ones talk to github.com and to the init
@@ -51,8 +59,64 @@ type updateOptions struct {
 var (
 	updateAPIBase     = githubAPIBase
 	updateReleaseBase = githubReleaseBase
-	restartService    = restartInstalledService
+	handOff           = handOverToNewBinary
 )
+
+// One update at a time. Two clicks in the dashboard must not race two
+// downloads onto the same binary.
+var updateInProgress atomic.Bool
+
+// handleRemoteUpdate services an "update" message from the control server.
+//
+// The work happens on its own goroutine: a download plus a service restart
+// takes far too long to block the socket read loop, which would stall
+// keystrokes and heartbeats and get this machine swept as stale.
+//
+// The "installed" report is best-effort. A successful update restarts the
+// service, which kills this process — often before the message is flushed. The
+// dashboard's real confirmation is the machine reconnecting on a new version.
+func handleRemoteUpdate(conn *safeConn, version string) {
+	if !updateInProgress.CompareAndSwap(false, true) {
+		_ = conn.writeJSON(AgentMessage{
+			Type: "updateStatus", State: "failed", Version: version,
+			Error: "an update is already in progress",
+		})
+		return
+	}
+
+	go func() {
+		defer updateInProgress.Store(false)
+
+		log.Printf("control server requested an update%s", versionSuffix(version))
+		_ = conn.writeJSON(AgentMessage{Type: "updateStatus", State: "started", Version: version})
+
+		if err := runUpdate(updateOptions{tag: version, skipRestart: true}); err != nil {
+			log.Printf("update failed: %v", err)
+			_ = conn.writeJSON(AgentMessage{
+				Type: "updateStatus", State: "failed", Version: version, Error: err.Error(),
+			})
+			return
+		}
+		_ = conn.writeJSON(AgentMessage{Type: "updateStatus", State: "installed", Version: version})
+
+		// Exiting is how the new binary gets picked up. Both supervisors are
+		// configured to restart us (systemd Restart=always, launchd KeepAlive),
+		// and exiting needs no privileges — asking systemctl or launchctl to
+		// restart the service does, which a non-root service account has not
+		// got. Give the message above a moment to reach the wire first.
+		log.Printf("update installed; exiting so the service manager restarts on the new binary")
+		time.Sleep(500 * time.Millisecond)
+		_ = conn.close()
+		os.Exit(0)
+	}()
+}
+
+func versionSuffix(version string) string {
+	if version == "" {
+		return " to the latest release"
+	}
+	return " to " + version
+}
 
 func runUpdate(opts updateOptions) error {
 	exe, err := currentExecutablePath()
@@ -121,19 +185,14 @@ func updateBinaryAt(exe string, opts updateOptions) error {
 	}
 	fmt.Printf("Installed %s to %s\n", target, exe)
 
-	restarted, err := restartService()
-	if err != nil {
-		// The binary is already in place, so this is not a failed update — it
-		// just means the old process is still running until someone restarts it.
-		fmt.Printf("warning: could not restart the service: %v\n", err)
-		fmt.Println("         the new binary is installed; restart it to pick it up.")
+	// A remote update is run by the service process itself, which exits below;
+	// systemd's Restart=always brings it back on the new binary with no
+	// privileged systemctl call in between.
+	if opts.skipRestart {
 		return nil
 	}
-	if restarted {
-		fmt.Println("Service restarted on the new version.")
-	} else {
-		fmt.Println("No service installed here; restart the agent to pick up the new version.")
-	}
+
+	handOff()
 
 	fmt.Println("This machine stays enrolled — its device key was not touched.")
 	return nil
@@ -326,19 +385,43 @@ func checkWritableDir(dir string) error {
 
 // restartInstalledService restarts the agent service when there is one, so the
 // new binary is what is actually running. Reports whether it found one.
-func restartInstalledService() (bool, error) {
+// serviceInstalled reports whether an init system is managing this agent, and
+// will therefore start it again when it exits.
+func serviceInstalled() bool {
 	switch runtime.GOOS {
 	case "linux":
-		if _, err := os.Stat(systemdUnitPath); err != nil {
-			return false, nil
-		}
-		return true, runCommand("systemctl", "restart", "spectre-agent.service")
+		_, err := os.Stat(systemdUnitPath)
+		return err == nil
 	case "darwin":
-		if _, err := os.Stat(launchdPlistPath); err != nil {
-			return false, nil
-		}
-		return true, runCommand("launchctl", "kickstart", "-k", "system/"+launchdLabel)
+		_, err := os.Stat(launchdPlistPath)
+		return err == nil
 	default:
-		return false, nil
+		return false
+	}
+}
+
+// handOverToNewBinary gets the running agent onto the binary just installed.
+//
+// It signals the agent rather than asking the service manager to restart it:
+// `systemctl restart` needs root, but the CLI and the service run as the same
+// account, so a plain SIGTERM does not. The agent shuts down cleanly on it, and
+// systemd's Restart=always (or launchd's KeepAlive) starts the new binary.
+// That is what lets `spectre-agent update` work without sudo.
+func handOverToNewBinary() {
+	running, info := checkRunning()
+	if !running || info == nil {
+		fmt.Println("No agent running here; the new binary is in place for the next start.")
+		return
+	}
+
+	if err := syscall.Kill(info.PID, syscall.SIGTERM); err != nil {
+		fmt.Printf("warning: could not signal the running agent (pid %d): %v\n", info.PID, err)
+		fmt.Println("         the new binary is installed; restart the agent to pick it up.")
+		return
+	}
+	if serviceInstalled() {
+		fmt.Println("Signalled the running agent; the service manager will start it on the new version.")
+	} else {
+		fmt.Println("Stopped the running agent; start it again to run the new version.")
 	}
 }

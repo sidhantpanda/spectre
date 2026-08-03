@@ -39,6 +39,28 @@ export function agentRoutes(deps: AgentDependencies): Router {
     }
   });
 
+  /**
+   * Asks a machine to upgrade itself. It keeps its device key, so it comes
+   * back as the same machine on the new version — nothing to re-approve.
+   *
+   * Returns as soon as the request is on the wire: the update takes a download
+   * and a service restart, and the dashboard learns it worked when the machine
+   * reconnects reporting a new agentVersion.
+   */
+  router.post("/agents/:id/update", (req: Request, res: Response) => {
+    const { version } = req.body as { version?: string };
+    if (version !== undefined && (typeof version !== "string" || !/^v?\d[\w.\-+]*$/.test(version))) {
+      return res.status(400).json({ error: "invalid version" });
+    }
+    try {
+      deps.pushToAgent(req.params.id, { type: "update", version });
+      res.json({ status: "requested", version: version ?? null });
+    } catch (err) {
+      // pushToAgent throws when there is no live socket for this machine.
+      res.status(409).json({ error: (err as Error).message });
+    }
+  });
+
   router.post("/agents/refresh-docker", (_req: Request, res: Response) => {
     deps.refreshDockerInfo?.();
     res.json({ status: "requested" });

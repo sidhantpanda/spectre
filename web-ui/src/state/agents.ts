@@ -59,6 +59,10 @@ export type Agent = {
   enrolledAt?: number;
   firstSeen?: number;
   agentVersion?: string;
+  /** Newest published agent release, when the server knows it. */
+  latestAgentVersion?: string;
+  /** True when this machine is running something other than latestAgentVersion. */
+  updateAvailable?: boolean;
   fingerprint?: AgentFingerprint;
   docker?: DockerContainer[];
   dockerError?: string;
@@ -155,7 +159,9 @@ export async function fetchAgents(apiBase: string = API_BASE): Promise<Agent[]> 
 export type AgentEvent =
   | { type: "agents"; agents: Agent[] }
   | { type: "agent"; agent: Agent }
-  | { type: "pending"; pending: PendingDevice[] };
+  | { type: "pending"; pending: PendingDevice[] }
+  /** A machine could not update itself; it will never report a new version. */
+  | { type: "updateFailed"; agentId: string; error: string };
 
 export type AgentEventHandlers = {
   onOpen?: () => void;
@@ -163,6 +169,8 @@ export type AgentEventHandlers = {
   onError?: () => void;
   /** Machines waiting for approval, pushed whenever the set changes. */
   onPending?: (pending: PendingDevice[]) => void;
+  /** A machine reported that its update failed. */
+  onUpdateFailed?: (agentId: string, error: string) => void;
 };
 
 export type AgentEventSubscription = { close: () => void };
@@ -204,6 +212,8 @@ export function subscribeToAgentEvents(
             onAgentUpdate(payload.agent);
           } else if (payload.type === "pending") {
             handlers.onPending?.(payload.pending ?? []);
+          } else if (payload.type === "updateFailed") {
+            handlers.onUpdateFailed?.(payload.agentId, payload.error);
           }
         } catch {
           // ignore malformed events
@@ -227,6 +237,25 @@ export function subscribeToAgentEvents(
       }
     },
   };
+}
+
+/**
+ * Asks a machine to upgrade itself to `version`.
+ *
+ * Returns as soon as the request is on the wire. The machine downloads,
+ * swaps its binary and restarts, then reconnects reporting the new version —
+ * so the list updating is what tells you it worked.
+ */
+export async function updateAgent(id: string, version?: string, apiBase: string = API_BASE): Promise<void> {
+  const res = await authFetch(`${apiBase}/agents/${id}/update`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(version ? { version } : {}),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? "failed to request an update");
+  }
 }
 
 /** Permanently removes a disconnected device from the dashboard. */

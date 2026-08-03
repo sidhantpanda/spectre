@@ -67,6 +67,49 @@ describe("routes", () => {
     expect(refreshNetworkInfo).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards an update request to the machine", async () => {
+    const { createApp } = await loadApp({ SPECTRE_DEV_NO_AUTH: "1" });
+    const app = createApp(deps);
+
+    const res = await request(app).post("/api/agents/abc/update").send({ version: "v1.5.0" });
+
+    expect(res.status).toBe(200);
+    expect(deps.pushToAgent).toHaveBeenCalledWith("abc", { type: "update", version: "v1.5.0" });
+  });
+
+  it("lets the machine choose when no version is pinned", async () => {
+    const { createApp } = await loadApp({ SPECTRE_DEV_NO_AUTH: "1" });
+    const res = await request(createApp(deps)).post("/api/agents/abc/update").send({});
+
+    expect(res.status).toBe(200);
+    expect(deps.pushToAgent).toHaveBeenCalledWith("abc", { type: "update", version: undefined });
+  });
+
+  it("rejects a version that is not a version", async () => {
+    const { createApp } = await loadApp({ SPECTRE_DEV_NO_AUTH: "1" });
+    const app = createApp(deps);
+
+    for (const version of ["../../etc/passwd", "; rm -rf /", "latest", ""]) {
+      const res = await request(app).post("/api/agents/abc/update").send({ version });
+      expect(res.status).toBe(400);
+    }
+    expect(deps.pushToAgent).not.toHaveBeenCalled();
+  });
+
+  // The request rides the machine's live socket; there is nowhere to put it
+  // when the machine is offline, and the UI should say so rather than pretend.
+  it("reports a conflict when the machine is not connected", async () => {
+    const { createApp } = await loadApp({ SPECTRE_DEV_NO_AUTH: "1" });
+    deps.pushToAgent = vi.fn(() => {
+      throw new Error("agent not connected");
+    });
+
+    const res = await request(createApp(deps)).post("/api/agents/abc/update").send({});
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("agent not connected");
+  });
+
   it("no longer exposes an endpoint that dials arbitrary addresses", async () => {
     const { createApp } = await loadApp({ SPECTRE_DEV_NO_AUTH: "1" });
     const res = await request(createApp(deps)).post("/api/agents/connect").send({ address: "ws://169.254.169.254/" });

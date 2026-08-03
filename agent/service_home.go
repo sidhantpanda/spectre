@@ -14,6 +14,10 @@ import (
 var defaultServiceAgentHome = "/var/lib/spectre-agent"
 
 func purgeDataDirs() {
+	// The real binary may live inside one of the directories about to go; put
+	// it back where it was first, so `spectre-agent` still works afterwards.
+	restore := restoreRelocatedBinary()
+
 	dirs := []string{}
 
 	if p, err := deviceInfoPath(); err == nil {
@@ -31,6 +35,10 @@ func purgeDataDirs() {
 		} else {
 			fmt.Printf("  removed %s\n", d)
 		}
+	}
+
+	if restore != nil {
+		restore()
 	}
 }
 
