@@ -17,10 +17,10 @@ splits traffic by path — `/api/*` to the control server (REST and every
 WebSocket, the agent's included), everything else to the static web UI:
 
 ```
-                        ┌──────────── proxy :3000 ───────────┐
+                        ┌──────────── proxy :3000 ────────────┐
 Browser  ──────────────►│  /api/*  ──►  server  (unpublished) │
 Agent    ──────────────►│  /*      ──►  web-ui  (unpublished) │
-                        └────────────────────────────────────┘
+                        └─────────────────────────────────────┘
 ```
 
 The agent **dials out** to your server and never opens a port, so it works behind NAT, CGNAT, and restrictive firewalls. There is nothing to expose on the machines you're connecting to.
