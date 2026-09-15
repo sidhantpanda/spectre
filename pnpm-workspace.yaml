@@ -7,3 +7,29 @@ allowBuilds:
   unrs-resolver: true
 onlyBuiltDependencies:
   - esbuild
+
+# apps/docs is React 19 while server/web-ui are React 18, so two copies of
+# @types/react exist and pnpm hoists only one of them into the virtual store.
+# These packages peer-depend on react but not on @types/react, so their .d.ts
+# files resolve React's types through that single hoisted copy — React 19's for
+# web-ui, which breaks every JSX element (TS2786). Declaring the missing peer
+# lets pnpm give each importer the @types/react matching its own react.
+packageExtensions:
+  lucide-react:
+    peerDependencies:
+      '@types/react': '*'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+  react-router:
+    peerDependencies:
+      '@types/react': '*'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+  react-router-dom:
+    peerDependencies:
+      '@types/react': '*'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
