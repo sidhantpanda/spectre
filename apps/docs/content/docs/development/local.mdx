@@ -1,0 +1,59 @@
+---
+title: "Local development"
+description: "Run the TypeScript workspace and Go agent with hot reload."
+---
+
+The `server` (API) and `web-ui` live in a single **pnpm workspace**. The `agent` is a separate Go module.
+
+Prerequisites: **Node 22+** (the server uses the built-in `node:sqlite`), **pnpm 11+**, and **Go 1.21+** (only for the agent).
+
+```bash
+pnpm install     # install workspace deps (once)
+pnpm dev         # run the API (:8080) and web UI (:5173) together
+```
+
+Open `http://localhost:5173`. The Vite dev server proxies `/api` to `:8080` — the same split the proxy container makes in production — so there's no CORS setup. `pnpm dev` sets `SPECTRE_DEV_NO_AUTH=1`, so there's no login screen in development.
+
+### Root scripts
+
+| Command | Description |
+|---------|-------------|
+| `pnpm dev` | Run server + web UI in parallel (preferred dev route) |
+| `pnpm dev:server` | Run only the API (:8080) |
+| `pnpm dev:web` | Run only the web UI (:5173) |
+| `pnpm dev:agent` | Enrol and run the Go agent against `ws://localhost:8080` with auto-reload |
+| `pnpm build` | Build every package |
+| `pnpm test` | Test every package |
+| `pnpm lint` | Type-check the web UI |
+
+Target a single package with `pnpm --filter @spectre/server <script>` or `pnpm --filter @spectre/web-ui <script>`.
+
+### The agent in development
+
+The agent needs a running server. In one terminal run `pnpm dev`; in another:
+
+```bash
+pnpm dev:agent
+```
+
+`agent/dev.sh` mints an auth key from the dev server and enrols with it, so the dev loop exercises the same enrollment path as production. Once enrolled, the stored device key is reused on every restart. It auto-reloads on file changes using `watchexec` or `entr` if available, otherwise it polls.
+
+To start over from an unenrolled state, delete `~/.spectre-agent`.
+
+### Docker Compose (alternative)
+
+`pnpm dev` is the faster inner loop. To test the built images:
+
+```bash
+docker compose -f compose.dev.yaml up -d --build
+docker compose -f compose.dev.yaml logs -f server
+docker compose -f compose.dev.yaml down
+```
+
+Web UI: `http://localhost:3000` — the proxy container, which also serves the API
+under `/api` on that same origin. The `server` and `web-ui` containers publish
+no ports of their own.
+
+The proxy config is bind-mounted, so editing `default.conf.template` and
+running `docker compose -f compose.dev.yaml restart proxy` picks it up — no
+rebuild.

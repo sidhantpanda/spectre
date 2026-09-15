@@ -241,8 +241,12 @@ More detail — per-package commands, Docker Compose, the HTTP/WebSocket API, an
 | `web-ui/` | React + Vite web UI (`@spectre/web-ui`) |
 | `agent/` | Go agent that runs on remote machines |
 | `docs/` | Developer & operator guide |
+| `apps/docs/` | Next.js + Fumadocs website and documentation |
 
 ## Documentation
+
+Run the documentation site with `pnpm dev:docs` at **http://localhost:3001**.
+Build it with `pnpm build:docs`. See [docs app setup and Vercel deployment](apps/docs/README.md).
 
 - [How it works](docs/GUIDE.md#how-it-works) — architecture and the connection model
 - [Production checklist](docs/GUIDE.md#production-checklist) — TLS, reverse proxy, hardening

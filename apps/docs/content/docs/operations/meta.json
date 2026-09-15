@@ -1,0 +1,8 @@
+{
+  "pages": [
+    "production",
+    "maintenance",
+    "troubleshooting"
+  ],
+  "title": "Operations"
+}

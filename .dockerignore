@@ -20,3 +20,6 @@ compose*.yaml
 default.conf.template
 LICENSE
 README.md
+
+# Public documentation is deployed independently on Vercel.
+apps/docs

@@ -1,0 +1,22 @@
+---
+title: "WebSocket protocol"
+description: "The messages exchanged between browser, control server, and agent."
+---
+
+Messages are JSON.
+
+| Direction | Type | Description |
+|-----------|------|-------------|
+| Agent → Server | `hello` | Handshake with device ID, fingerprint, version |
+| Agent → Server | `output` | PTY output chunks |
+| Agent → Server | `heartbeat` | Sent every 25s for liveness |
+| Agent → Server | `dockerInfo` | Docker container list |
+| Agent → Server | `systemInfo` | OS, CPU, memory, disk, tmuxAvailable |
+| Agent → Server | `networkInfo` | IPv4/IPv6 addresses |
+| Server → Agent | `hello` | Handshake response |
+| Server → Agent | `enrolled` | Issues the device key after an auth key is redeemed |
+| Server → Agent | `keystroke` | Terminal input from the browser |
+| Server → Agent | `reset` | Attach to an existing tmux session or start a shell |
+| Server → Agent | `dockerInfo` / `systemInfo` / `networkInfo` | Request the corresponding info |
+
+The server drops agent messages larger than 256 KB and browser messages larger than 64 KB.

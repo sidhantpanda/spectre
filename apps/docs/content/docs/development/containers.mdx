@@ -1,0 +1,22 @@
+---
+title: "Container builds"
+description: "Build the control server and web UI from the workspace root."
+---
+
+Spectre builds two images. Both build from the **repo root** (the pnpm workspace and its single lockfile), not from their subdirectories:
+
+```bash
+docker build -f server/Dockerfile -t spectre-server .
+docker build -f web-ui/Dockerfile -t spectre-web-ui .
+```
+
+The server image uses `pnpm deploy` to produce a self-contained production-only `node_modules`. The web UI image builds the static bundle and serves it with nginx — static files only, no proxying.
+
+**The proxy is stock `nginx:1.29.4-alpine`** — there is nothing to build or publish. Compose mounts `default.conf.template` at `/etc/nginx/templates/`, and the image's own entrypoint runs `envsubst` over it at start, writing `/etc/nginx/conf.d/default.conf`. Two variables are filled in:
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `SPECTRE_SERVER_UPSTREAM` | `server:8080` | Where `/api/*` goes |
+| `SPECTRE_WEB_UI_UPSTREAM` | `web-ui:80` | Where everything else goes |
+
+`NGINX_ENVSUBST_FILTER=^SPECTRE_` keeps envsubst off nginx's own runtime variables (`$host`, `$http_upgrade`, …), which would otherwise be blanked out. The proxy is the only container that publishes a port, which is why no CORS configuration is needed and there is a single place to terminate TLS.

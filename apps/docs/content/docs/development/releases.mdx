@@ -1,0 +1,24 @@
+---
+title: "Releases"
+description: "Publish coordinated container images and Go agent binaries."
+---
+
+Everything ships from **one tag**. Push a `v*` tag (e.g. `v1.2.3`) and the `Release` workflow:
+
+1. builds + pushes the **server** image to `ghcr.io/sidhantpanda/spectre/server`,
+2. builds + pushes the **web-ui** image to `ghcr.io/sidhantpanda/spectre/web-ui`,
+3. cross-compiles the **agent** binaries (linux/darwin, amd64/arm64), and
+4. publishes a **GitHub release** for the tag with the agent binaries attached.
+
+The proxy is stock nginx, so no third image is built or released.
+
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+Images are tagged with the full version plus `major.minor`, `major`, `latest`, and the commit SHA. The install script downloads the agent from the latest `v*` release.
+
+> The release does not yet publish checksums, and `install-agent.sh` does not verify the download. Anyone who can tamper with the release assets or the connection can run code as root on machines that install the agent. This is the top open item before a wide release.
+
+Running the workflow manually (Actions tab → Release → *Run workflow*) builds the same artifacts from the current commit, tagged with the SHA, without publishing a release or moving `latest`.
