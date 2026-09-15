@@ -1,0 +1,35 @@
+---
+title: "Upgrades and backups"
+description: "Keep device enrollment state safe and update the server and agents."
+---
+
+## Back up the control server
+
+The device store lives in `DATA_DIR` and includes `spectre.db`. Preserve the entire data directory. Stop the server before taking a filesystem copy so SQLite files stay consistent; restart it once the copy completes. Keep backups private and test restoring them to an isolated deployment.
+
+Losing the device database requires enrolling your machines again. Keep your Compose configuration and deployment environment alongside your recovery instructions.
+
+## Update containers
+
+From the directory containing `compose.yaml` and `default.conf.template`:
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose logs --tail=100 server
+```
+
+Take a backup before updating. Check that machines reconnect and open a terminal after the rollout. Avoid `docker compose down -v`: it removes the persistent volumes.
+
+## Update an agent
+
+```bash
+spectre-agent update --check
+spectre-agent update
+```
+
+The dashboard also offers an update button for connected machines on an older build. Enrollment is preserved. Use `spectre-agent update --tag v1.2.3` to select a specific release, replacing the example with the intended tag.
+
+## Retire a machine
+
+Revoke the machine in the UI to immediately terminate access. On the target, run `sudo spectre-agent down --purge` to remove its service and enrollment state. This leaves the binary installed. Remove the disconnected device in the UI when finished.

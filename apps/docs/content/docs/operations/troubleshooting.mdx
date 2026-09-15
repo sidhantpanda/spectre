@@ -1,0 +1,30 @@
+---
+title: "Troubleshooting"
+description: "Work through the proxy, control server, and agent connection in order."
+---
+
+## The server will not start
+
+Set `ADMIN_PASSWORD` in the deployment environment and inspect `docker compose logs --tail=100 server`. The server deliberately refuses to run without a password. The development bypass is rejected in production.
+
+## The UI loads but terminals do not connect
+
+The reverse proxy must route every `/api/*` request to the control server, including WebSocket upgrades. Start with the supplied `default.conf.template`. An outer TLS proxy must also preserve WebSocket upgrades. The browser and agents should use the same public deployment origin.
+
+## A machine does not appear
+
+Check its `--host` value. On a remote machine, `localhost` means that remote machine, not the control server. Use the server's reachable address, with `wss://` over the internet. Check DNS, certificate trust, and outbound connectivity from the target.
+
+For interactive enrollment, approve the pending machine or enter the printed code at `/enroll` in your Spectre deployment. An expired or revoked auth key cannot enroll a new device; create a new key in the dashboard.
+
+## Sessions disappear after reconnecting
+
+Install tmux on the agent host. Without tmux, terminal sessions do not persist across disconnections. See [persistent sessions](/docs/reference/agent#persistent-sessions-via-tmux).
+
+## The UI advertises the wrong agent address
+
+Set `SPECTRE_PUBLIC_HOST` to the public WebSocket origin. Only enable `TRUST_PROXY=1` when your trusted proxy sets the forwarded headers. See [server configuration](/docs/reference/server#configuration).
+
+## Collect useful diagnostics
+
+Include the server and agent versions, target OS and architecture, relevant error messages, and whether the issue occurs before or after enrollment. Remove credentials and terminal output containing private data before sharing logs in a GitHub issue.

@@ -1,0 +1,42 @@
+---
+title: "Architecture"
+description: "Follow the browser, proxy, control server, and outbound agent connection."
+---
+
+The agent dials out to the server over a WebSocket and **never listens on a port**. The browser connects to the server, and the server bridges terminal I/O between the two. If **tmux** is installed on the remote machine, sessions persist across browser disconnects and network drops.
+
+```
+┌───────────┐                   ┌─────────────────┐                         ┌───────────────┐
+│  Browser  │ ◄──────────────►  │      Proxy      │  ◄────────────────────► │     Agent     │
+│ (xterm.js)│   ticket auth     │     (nginx)     │   device key auth       │  (+ tmux) Go  │
+└───────────┘                   └────────┬────────┘                         └───────────────┘
+                                         │                                    dials out only,
+                    /api/* ──────────────┼──────────────► Control Server      no open ports
+                    /*     ──────────────┘                   (Node.js)
+                                                                 │
+                                                                 ▼
+                                                            spectre.db
+                                                  (devices, connections, hashed keys)
+```
+
+The proxy is the only published port. It routes `/api/*` to the control server
+— `/api/terminal` and `/api/agents/events` for the browser, `/api/agents/register`
+for agents — and everything else to the static web UI. Serving both from one
+origin is why there is no CORS to configure and one place to terminate TLS.
+
+Because the connection is always agent → server, Spectre works through NAT, CGNAT, and outbound-only firewalls, and there is no listening service to attack on the machines you connect to.
+
+### Enrollment
+
+A machine is only trusted once you say so. There are two ways to say it:
+
+| | Auth key | Interactive approval |
+|---|---|---|
+| Command | `spectre-agent up --host … --authkey sk_…` | `spectre-agent up --host …` |
+| Good for | scripts, cloud-init, golden images | adding a machine by hand |
+| How it works | key is redeemed on connect and exchanged for a device key | agent prints a code; an admin approves it in the UI |
+| Default lifetime | single use, 90 days | 15 minutes |
+
+Both end in the same place: the machine holds a long-lived **device key**, and the enrollment credential is spent. The device key is stored `0600` on the machine and only ever as a hash on the server.
+
+A machine waiting for interactive approval appears on the dashboard's machine list as soon as it asks — pushed over the dashboard's event socket, no reload — marked **Pending approval** with a yellow dot, and is approved or rejected from that row. (`/enroll` is still there for typing a code in by hand.) Once approved it becomes a real device row, yellow until its first connection lands, and red only after it has connected and then dropped.

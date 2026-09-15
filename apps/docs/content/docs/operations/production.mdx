@@ -1,0 +1,16 @@
+---
+title: "Production checklist"
+description: "TLS, credentials, trust boundaries, and machine revocation."
+---
+
+Spectre gives a browser a root shell. Before exposing it:
+
+- [ ] **Set a real `ADMIN_PASSWORD`** (`openssl rand -base64 24`). The server refuses to start without one.
+- [ ] **Terminate TLS** in front of the server and use `wss://` for agents. The supplied Compose file publishes only the proxy's port, so it is the single place to add TLS.
+- [ ] **Never set `SPECTRE_DEV_NO_AUTH`.** It is refused outright when `NODE_ENV=production`.
+- [ ] **Back up `DATA_DIR`.** Losing `spectre.db` means re-enrolling every machine.
+- [ ] **Set `TRUST_PROXY=1` only if** a proxy you control sets `X-Forwarded-For`. Otherwise the login rate limiter can be bypassed by forging the header.
+- [ ] **Revoke machines you no longer own** in the UI. Revocation kills the live session immediately.
+- [ ] Prefer **single-use auth keys**. Reusable keys enrol unlimited machines until they expire or are revoked.
+
+There is currently **one admin and no per-machine access control**: anyone with the password can shell into every enrolled machine.

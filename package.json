@@ -13,7 +13,10 @@
     "dev:agent": "cd agent && AGENT_HOST=ws://localhost:8080 ./dev.sh",
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
-    "lint": "pnpm --filter @spectre/web-ui run lint"
+    "lint": "pnpm --filter @spectre/web-ui run lint",
+    "dev:docs": "pnpm --filter @spectre/docs dev",
+    "build:docs": "pnpm --filter @spectre/docs build",
+    "lint:docs": "pnpm --filter @spectre/docs lint"
   },
   "devDependencies": {
     "cross-env": "^7.0.3"

@@ -1,0 +1,9 @@
+{
+  "pages": [
+    "local",
+    "containers",
+    "releases",
+    "documentation"
+  ],
+  "title": "Developers"
+}

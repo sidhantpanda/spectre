@@ -1,0 +1,118 @@
+---
+title: "Your first connected machine"
+description: "Deploy the server, enroll an agent, and open your first browser terminal."
+---
+
+## Before you start
+
+You need a Docker host with Docker Compose, a Linux or macOS machine to enroll, and a browser. Install tmux on the target for persistent sessions. Use a domain and TLS before connecting over the public internet.
+
+The standard deployment installs three containers: the Node.js control server, the static web UI, and an nginx proxy. Only the proxy publishes port 3000. The Go agent runs as a service on each target machine and dials out to the server.
+
+
+Two steps: run a server, add a machine.
+
+### 1. Run the server
+
+```bash
+# Generate a password — the server will not start without one.
+export ADMIN_PASSWORD=$(openssl rand -base64 24)
+echo "Your password: $ADMIN_PASSWORD"
+
+BASE=https://raw.githubusercontent.com/sidhantpanda/spectre/main
+curl -fsSL $BASE/compose.yaml -o compose.yaml
+curl -fsSL $BASE/default.conf.template -o default.conf.template
+docker compose up -d
+```
+
+`default.conf.template` is the reverse proxy's nginx config. Compose mounts it
+into the stock `nginx` image — there is no Spectre proxy image to pull.
+
+Open `http://<server-ip>:3000` and log in.
+
+> **Before you expose this to the internet**, put it behind a reverse proxy with TLS and use `wss://`. Spectre hands out root shells; treat the server like an SSH bastion. See [Production checklist](/docs/operations/production).
+
+### 2. Add a machine
+
+**One line** — for scripts, cloud-init, and images. Create an auth key in the UI ("Add a machine" → *Create auth key*), which hands you a command to paste on the target machine:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh \
+  | sudo SPECTRE_AUTHKEY=sk_... bash -s -- --host wss://spectre.example.com
+```
+
+That downloads the agent build matching the machine's OS and architecture, installs it, enrolls it, and starts it as a service. The key goes through the environment so it never appears in `ps`.
+
+**Interactive** — no secrets to copy around. Install the agent first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh | sudo bash
+```
+
+Then connect it:
+
+```bash
+sudo spectre-agent up --host wss://spectre.example.com
+```
+
+It prints a code and a link. Open the link in Spectre, approve the code, done:
+
+```
+To add this machine, open Spectre and approve it:
+
+    https://spectre.example.com/enroll
+
+    Code:  XNV3-VH3T
+
+Waiting for approval...
+```
+
+You can also skip the auth key and let the installer do the same thing — pass `--host` with no key and it prints the code for you:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sidhantpanda/spectre/main/scripts/install-agent.sh \
+  | sudo bash -s -- --host wss://spectre.example.com
+```
+
+Either way the machine enrolls, stores a device key, installs itself as a service, and reconnects on boot. Click it in the UI to open a terminal.
+
+### 3. Update a machine
+
+**From the web UI.** Connected machines running an older build show an
+**Update to vX.Y.Z** button in the machine list. Click it and that machine
+upgrades itself and reconnects — it stays enrolled, so there is nothing to
+re-approve.
+
+**On the machine itself:**
+
+```bash
+spectre-agent update
+```
+
+No sudo needed: `up` puts the binary somewhere the service account owns, and the
+restart is a signal rather than a `systemctl` call. It pulls the latest release
+from GitHub, replaces the binary, and hands the running agent over to it. The machine **stays enrolled** — no new auth key, no re-approval.
+`--check` reports whether an update is available without installing it, and
+`--tag v1.2.3` pins a specific release.
+
+### 4. Remove a machine
+
+To uninstall the agent, run this on the machine itself:
+
+```bash
+sudo spectre-agent down
+```
+
+This stops and removes the service but keeps the stored device key, so running `spectre-agent up` again re-enrolls without another approval. To also delete the device key and enrollment state, add `--purge`:
+
+```bash
+sudo spectre-agent down --purge
+```
+
+Neither removes the binary itself. Delete it when you're done:
+
+```bash
+sudo rm /usr/local/bin/spectre-agent
+```
+
+Removing the agent doesn't delete the device from the control server. Use **Remove** on the (now disconnected) device in the web UI to drop it from the list.

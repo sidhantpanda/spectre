@@ -1,7 +1,9 @@
 packages:
   - server
   - web-ui
+  - apps/docs
 allowBuilds:
   esbuild: true
+  unrs-resolver: true
 onlyBuiltDependencies:
   - esbuild

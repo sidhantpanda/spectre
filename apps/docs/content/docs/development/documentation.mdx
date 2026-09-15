@@ -1,0 +1,31 @@
+---
+title: "Documentation development"
+description: "Run, edit, and deploy the Next.js and Fumadocs documentation app."
+---
+
+## Run locally
+
+```bash
+pnpm install
+pnpm dev:docs
+```
+
+Open `http://localhost:3001`. Edit MDX pages under `apps/docs/content/docs`. Each page has a title and description in YAML frontmatter. Folder `meta.json` files control navigation order.
+
+## Validate changes
+
+```bash
+pnpm --filter @spectre/docs lint
+pnpm --filter @spectre/docs typecheck
+pnpm build:docs
+```
+
+Check the page on desktop and mobile, test search, and verify command examples against the project source. The app also exposes `/llms.txt`, `/llms-full.txt`, and Markdown versions of documentation pages.
+
+## Deploy to Vercel
+
+Import this repository with **Root Directory** set to `apps/docs` and the **Next.js** framework preset. Use `pnpm build` as the app build command and the default Next.js output setting. Install dependencies from the workspace lockfile.
+
+Set `NEXT_PUBLIC_SITE_URL` to your documentation site's production origin for canonical URLs and sitemap metadata. Without it, the app uses Vercel's production URL, then its deployment URL.
+
+Vercel hosts this public documentation app. Run the Spectre control server on infrastructure that supports long-lived WebSockets and persistent SQLite storage, using the Docker installation guide.
